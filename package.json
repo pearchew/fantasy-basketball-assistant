@@ -10,7 +10,8 @@
     "test": "vitest run",
     "spike": "tsx --env-file-if-exists=.env.local scripts/spike.mts",
     "sync-players": "tsx --env-file-if-exists=.env.local scripts/sync-players.mts",
-    "login-link": "tsx --env-file-if-exists=.env.local scripts/login-link.mts"
+    "login-link": "tsx --env-file-if-exists=.env.local scripts/login-link.mts",
+    "backfill-logs": "tsx --env-file-if-exists=.env.local scripts/backfill-logs.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

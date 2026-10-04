@@ -2,7 +2,7 @@
 
 A personal tool that watches NBA injury news and tells me which players stand to gain. See [docs/PRD.md](docs/PRD.md).
 
-**Status:** Phase 1 (teams and rosters). Phase 0 findings are in [docs/phase-0-findings.md](docs/phase-0-findings.md).
+**Status:** Phase 2 (injury feed). Phase 0 findings are in [docs/phase-0-findings.md](docs/phase-0-findings.md).
 
 ## Stack
 
@@ -27,11 +27,15 @@ npm run dev
 
 ## Supabase setup (once)
 
-1. Run [`supabase/migrations/0001_teams_and_rosters.sql`](supabase/migrations/0001_teams_and_rosters.sql) in the Supabase SQL editor.
+1. Run each file in [`supabase/migrations/`](supabase/migrations/) in order in the Supabase SQL editor.
 2. In Authentication → URL Configuration, set the Site URL to the Vercel URL and add `http://localhost:3000/**` and `https://<deployment>/**` as redirect URLs.
-3. Load the player directory: `npm run sync-players`. After that, Vercel Cron runs `/api/cron/sync-players` daily at 10:00 UTC.
+3. Load the player directory (`npm run sync-players`) and past game logs (`npm run backfill-logs -- 2025-10-21 2026-06-20`). After that, Vercel Cron runs `/api/cron/daily` at 10:00 UTC: player sync, yesterday's game logs, and an injury report check.
 4. To sign in without waiting for an email (the free plan sends only a few per hour): `npm run login-link` for localhost, or `npm run login-link -- https://<deployment>`.
 5. After your first sign-in, turn off "Allow new users to sign up" in Authentication → Sign In / Providers.
+
+## How the feed refreshes
+
+Opening the feed shows saved data straight away. If the last check is over 10 minutes old, the page calls `POST /api/refresh`, which fetches the newest official report (published every 15 minutes on game days), merges it into one row per player and game, and reloads the page. The server allows one fetch per 10 minutes however often the page is opened. `/?date=YYYY-MM-DD` shows a past game day from the archive.
 
 ## Phase 0 check on Vercel
 

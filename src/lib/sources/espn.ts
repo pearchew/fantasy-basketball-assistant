@@ -18,6 +18,8 @@ export type GameSummary = {
   eventId: string;
   date: string; // ISO tip-off time
   status: string; // e.g. STATUS_FINAL, STATUS_SCHEDULED
+  season: number; // ESPN season year: 2027 = 2026-27
+  seasonType: number; // 1 preseason, 2 regular season, 3 postseason
   home: string;
   away: string;
 };
@@ -92,6 +94,7 @@ type ScoreboardResponse = {
   events: {
     id: string;
     date: string;
+    season: { year: number; type: number };
     status: { type: { name: string } };
     competitions: { competitors: { homeAway: "home" | "away"; team: { abbreviation: string } }[] }[];
   }[];
@@ -103,7 +106,15 @@ export async function fetchScoreboard(yyyymmdd: string): Promise<GameSummary[]> 
   return d.events.map((e) => {
     const side = (h: string) =>
       e.competitions[0].competitors.find((c) => c.homeAway === h)?.team.abbreviation ?? "";
-    return { eventId: e.id, date: e.date, status: e.status.type.name, home: side("home"), away: side("away") };
+    return {
+      eventId: e.id,
+      date: e.date,
+      status: e.status.type.name,
+      season: e.season.year,
+      seasonType: e.season.type,
+      home: side("home"),
+      away: side("away"),
+    };
   });
 }
 
@@ -114,7 +125,7 @@ type SummaryResponse = {
       statistics: {
         labels: string[];
         athletes: {
-          athlete: { id: string; displayName: string };
+          athlete: { id?: string; displayName?: string };
           starter: boolean;
           didNotPlay?: boolean;
           stats: string[];
@@ -136,6 +147,8 @@ export async function fetchBoxScore(eventId: string): Promise<BoxLine[]> {
     const table = side.statistics[0];
     const col = (name: string) => table.labels.indexOf(name);
     for (const a of table.athletes) {
+      // ESPN occasionally lists an unidentified DNP placeholder (no id, no stats). Nothing to attribute.
+      if (!a.athlete.id || !a.athlete.displayName) continue;
       const s = a.stats;
       const num = (label: string) => Number(s[col(label)]) || 0;
       const [fgm, fga] = makesAttempts(s[col("FG")]);

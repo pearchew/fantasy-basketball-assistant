@@ -37,7 +37,7 @@ export function NewTeamForm({ onDone }: { onDone?: () => void }) {
           if (r.error) return setError(r.error);
           setName("");
           onDone?.();
-          router.push(`/?view=${r.id}`);
+          router.push(`/teams?view=${r.id}`);
         });
       }}
     >
@@ -128,7 +128,7 @@ export function TeamSettings({ team, playerCount }: { team: Team; playerCount: n
           startTransition(async () => {
             const r = await deleteTeam(team.id);
             if (r.error) return setError(r.error);
-            router.push("/?view=all");
+            router.push("/teams?view=all");
           });
         }}
         className="ml-auto rounded-lg px-3 py-2 text-sm text-danger hover:bg-accent-soft"

@@ -18,6 +18,8 @@ export type InjuryEntry = {
   playerName: string; // "Dereck Lively II"
   status: InjuryStatus;
   reason: string;
+  /** The printed line(s) for this row, top to bottom: wrapped reasons span up to three lines. */
+  rawText: string;
 };
 
 export type NotSubmitted = { gameDate: string; matchup: string; team: string };
@@ -133,7 +135,13 @@ function isoDate(mmddyyyy: string): string {
   return `${y}-${m}-${d}`;
 }
 
-type PendingEntry = { entry: Omit<InjuryEntry, "reason">; y: number; reasonParts: { y: number; text: string }[] };
+type Line = { y: number; text: string };
+type PendingEntry = {
+  entry: Omit<InjuryEntry, "reason" | "rawText">;
+  y: number;
+  reasonParts: Line[];
+  lines: Line[];
+};
 
 export async function parseInjuryReport(bytes: Uint8Array): Promise<InjuryReport> {
   // pdf.js transfers (detaches) the buffer it is given; copy so callers keep theirs.
@@ -156,7 +164,7 @@ export async function parseInjuryReport(bytes: Uint8Array): Promise<InjuryReport
       });
 
     const pageEntries: PendingEntry[] = [];
-    const fragments: { y: number; text: string }[] = [];
+    const fragments: (Line & { rowText: string })[] = [];
     let headerY = Infinity;
 
     for (const row of groupRows(tokens)) {
@@ -199,11 +207,12 @@ export async function parseInjuryReport(bytes: Uint8Array): Promise<InjuryReport
           },
           y: row[0].y,
           reasonParts: c.reason ? [{ y: row[0].y, text: c.reason }] : [],
+          lines: [{ y: row[0].y, text: joinTokens(row.map((t) => t.str)) }],
         });
       } else if (c.reason && /NOT YET SUBMITTED/i.test(c.reason)) {
         notSubmitted.push({ gameDate: ctx.date, matchup: ctx.matchup, team: ctx.team });
       } else if (c.reason) {
-        fragments.push({ y: row[0].y, text: c.reason });
+        fragments.push({ y: row[0].y, text: c.reason, rowText: joinTokens(row.map((t) => t.str)) });
       }
     }
 
@@ -214,14 +223,19 @@ export async function parseInjuryReport(bytes: Uint8Array): Promise<InjuryReport
         null,
       );
       nearest?.reasonParts.push(f);
+      nearest?.lines.push({ y: f.y, text: f.rowText });
     }
-    for (const { entry, reasonParts } of pageEntries) {
+    for (const { entry, reasonParts, lines } of pageEntries) {
       const reason = reasonParts
         .sort((a, b) => b.y - a.y)
         .map((r) => r.text)
         .join(" ")
         .trim();
-      entries.push({ ...entry, reason: reason === "-" ? "" : reason });
+      const rawText = lines
+        .sort((a, b) => b.y - a.y)
+        .map((l) => l.text)
+        .join("\n");
+      entries.push({ ...entry, reason: reason === "-" ? "" : reason, rawText });
     }
   }
 
