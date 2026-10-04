@@ -1,14 +1,26 @@
-# PRD: Fantasy Basketball Assistant (v2)
+# PRD: Fantasy Basketball Assistant (v3, as built)
 
 Oct 4, 2026 · @Pierson
 
-> **About this revision.** v2 builds on the original PRD. Lines that changed or are new are marked **[v2]**. Claims not yet checked against a live source are marked **[verify]**. A changelog at the end maps each review point to the edit it produced.
+> **About this revision.** v3 records what was built in Phases 0–4. Each feature lists its requirements as shipped and each acceptance criterion's measured result. Decisions made during the build are marked **[built]**. The few claims still unverified are marked **[verify]**. The change history at the end covers v1 → v2 (review) and v2 → v3 (build).
+
+Live app: https://fantasy-basketball-assistant-five.vercel.app · Code: `pearchew/fantasy-basketball-assistant` (private)
+
+## Status
+
+| Phase | Status | Acceptance result |
+| --- | --- | --- |
+| 0. Data spike | Done | Every source returns real data from a deployed Vercel function (iad1). The latest-report check skips until the first regular-season game day. |
+| 1. Teams | Done | Add or drop takes about 1 s; a player on two teams shows both names; trades update through the daily sync. |
+| 2. Feed | Done | 142 of 142 rows on a real game-day report parsed and matched, or listed for review. Live game day pending (season starts about Oct 20). |
+| 3. Next-up | Done | Backtest 18/20 (90%) with rules only and with rules + model, against a 70% target. The Cooper Flagg example names Risacher and Marshall. |
+| 4. Stats | Done | 5 of 5 players match ESPN's official 2025-26 season averages. |
 
 ## Summary
 
-A personal tool that watches NBA injury news and tells me which players stand to gain. It starts with the ones on any of my fantasy teams or watchlist. **[v2]** It does not know who is a free agent in each league; "unowned" means not on any of my teams.
+A personal tool that watches NBA injury news and tells me which players stand to gain, starting with the ones on any of my fantasy teams or watchlist. It does not know who is a free agent in each league: "unowned" means not on any of my teams.
 
-Today that means refreshing a news feed, working out who absorbs the minutes, then checking recent form on another site. The tool collapses those three steps into one view: who is out, who is next up, and how those players have been playing.
+Before, that meant refreshing a news feed, working out who absorbs the minutes, then checking recent form on another site. The tool collapses those three steps into one view: who is out, who is next up, and how those players have been playing.
 
 ## Goals and non-goals
 
@@ -17,7 +29,7 @@ Today that means refreshing a news feed, working out who absorbs the minutes, th
 - Keep an up-to-date roster for each of my fantasy teams, editable in seconds.
 - Surface injury and inactive news soon after the source publishes it.
 - For each player ruled out, name the likely beneficiaries and say why.
-- **[v2]** For each player returning from absence, name the players likely to lose minutes.
+- For each player returning from absence, name the players likely to lose minutes.
 - Show recent form for any player over the last 7, 14 and 30 games.
 - Cost nothing to build or run: free data, free hosting on Vercel and Supabase, no paid APIs.
 
@@ -26,199 +38,216 @@ Today that means refreshing a news feed, working out who absorbs the minutes, th
 - Syncing automatically with my fantasy platform. The roster is entered by hand.
 - Statistical projections. Next-up calls are reasoned inferences, not model outputs.
 - Setting lineups, proposing trades or making waiver claims on my behalf. No alerts, and no tracking of who is a free agent in each league.
-- Supporting other users. One person, several teams. **[v2]** The app is still deployed publicly, so it needs a login (see Access).
-- **[v2]** Category-specific advice per league format. The stats panel is the same for every team.
+- Supporting other users. One person, several teams. The app is deployed publicly, so it needs a login (see Access).
+- Category-specific advice per league format. The stats panel is the same for every team.
 
 ## Core user flow
 
-One loop covers the main use: news arrives, the tool reasons about it, I decide what to do.
-
-1. A news source reports that a player is out, doubtful or returning.
-2. The tool parses the report into a structured update: player, team, status, game date.
-3. It works out who benefits, or who loses out on a return, using the team's current depth chart.
-4. It checks each name against all my teams and shows which of them, if any, the player is on.
-5. I open the tool and see the update, the beneficiaries and their recent stats side by side.
+1. The NBA publishes an injury report (every 15 minutes on game days).
+2. The tool parses it into structured updates: player, team, status, reason, game.
+3. It works out who benefits, or who loses out on a return, from the team's depth chart.
+4. It checks each name against all my teams and the watchlist.
+5. I open the tool and see the updates grouped by game, the next-up calls and their recent stats side by side.
 6. I act on my fantasy platform: start, sit, add or drop.
 7. If I add or drop someone, I update that team's roster in the tool.
 
-## Access **[v2]**
+## Access
 
-- Sign in with a Supabase email magic link. Both are free.
-- Row-level security on every table limits reads and writes to my account.
-- The refresh endpoint requires a signed-in session and runs at most once per 10 minutes, however often it is called. This protects the free model and data quotas.
+- Sign in with a Supabase email magic link. Only the address in `ALLOWED_EMAIL` is sent one; any other address gets the same "check your inbox" reply.
+- **[built]** Supabase's built-in email allows only a few messages an hour, so `npm run login-link` mints a one-time sign-in link with the secret key and opens it in the browser, with no email involved.
+- **[built]** New sign-ups are switched off in Supabase after the first sign-in.
+- Row-level security on every table: my teams, rosters and watchlist are readable and writable only by my account. Shared data (players, injury updates, games, next-up) is read-only for signed-in users and written only by server jobs with the secret key. Anonymous requests are refused on every table and function.
+- The refresh endpoint needs a signed-in session. It fetches the report at most once per 10 minutes when called automatically, and at most once a minute when I press **Refresh**.
+- Scheduled and diagnostic endpoints (`/api/cron/daily`, `/api/spike`) need their own bearer secrets.
 
 ## Feature 1: Teams and rosters
 
-I can keep several fantasy teams, each with its own roster, and add or remove players on any of them.
+**Requirements (as built)**
 
-**Requirements**
-
-- Create, rename and delete teams. Each team has a name. **[v2]** The head-to-head 9-cat or roto format is stored as a label only; nothing in v1 depends on it.
-- Switch between teams in one click, or view all teams together.
-- Search for a player by name with autocomplete, then add them to a chosen team in one click.
-- Remove a player from a team in one click.
-- The same player can sit on more than one team.
-- Each player is stored with a stable ID, NBA team and position, so name clashes and trades do not break matching.
-- **[v2]** The player directory comes from one named free source, refreshed by the daily job. It must include rookies, two-way and 10-day contracts. The source is chosen in Phase 0.
-- **[v2]** Position is taken from that directory source. It is NBA-listed position (G, F, C and combinations), not fantasy-platform eligibility.
-- Teams and rosters persist between sessions.
-- One shared watchlist holds players I do not own but want to track.
+- Create, rename and delete teams. Each team has a name and a format label (H2H 9-cat or roto); nothing depends on the format in v1.
+- Switch between teams in one click, see all teams together, or open the shared watchlist.
+- Search players with autocomplete. Every typed word must start a word of the name, and accents are ignored ("j bru" finds Jalen Brunson, "doncic" finds Dončić). Enter or a click adds the player to the chosen team or the watchlist.
+- Remove a player in one click.
+- The same player can be on several teams. Wherever he appears, every team he's on (and the watchlist) is shown.
+- Players are keyed by ESPN player ID, with NBA team and position from ESPN rosters.
+- **[built]** The player directory syncs daily from ESPN team rosters (all 30, including two-way players). A player missing from every roster is marked inactive, never deleted, so rosters still show him with a "not on an NBA roster" tag. A fetch returning fewer than 350 players is refused rather than marking the league inactive.
+- Position is ESPN's NBA-listed position, collapsed to G, F or C.
 
 **Acceptance criteria**
 
-- Adding or dropping a player takes under 10 seconds.
-- A player on two of my teams shows both team names wherever he appears.
-- When a rostered player changes NBA team, his team updates by the next daily refresh without me re-entering him.
+| Criterion | Result |
+| --- | --- |
+| Adding or dropping a player takes under 10 seconds | About 1 s per add or drop, measured locally |
+| A player on two of my teams shows both team names wherever he appears | Confirmed in use and covered by unit tests |
+| A rostered player who changes NBA team updates by the next daily refresh | The sync keys on the stable ESPN ID and updates his team; unit-tested. The daily job runs at 10:00 UTC |
+| Phase 1: rebuild all my teams in under 10 minutes | Met in use; not formally timed |
 
 ## Feature 2: Injury and inactive feed
 
-The tool pulls player availability news from a free source and turns each report into a structured update.
+**Requirements (as built)**
 
-**Requirements**
-
-- Ingest availability news from a free source. Underdog NBA on X stays the reference for speed and format, but X charges per post read, so it is out unless a free route turns up.
-- **[v2]** The v1 source is assumed to be the NBA's official injury report, a structured table published at set times. **[verify]** Check its format and publishing schedule in Phase 0. If a free-text source is used instead, the free-text criteria below apply.
-- Extract player, team, status (out, doubtful, questionable, probable, available), reason and the game it applies to.
-- **[v2]** Match each name to a stable player ID. Normalise the order ("Last, First"), suffixes (Jr., III) and accents (Jokić, Dončić). Names that fail to match go to a review list and are never dropped silently.
-- **[v2]** Collapse repeat reports into one update per (player, game). Keep the status history, for example questionable → out, and show the latest status.
-- Show updates newest first, with players from any of my teams or the watchlist pinned to the top and tagged with the team name.
-- **[v2]** Show new and changed statuses first. Collapse long-term absences whose status has not changed since the last report into one line per team.
-- **[v2]** Archive an update once its game has been played.
-- Keep the original text or table row, and its timestamp, alongside the parsed update so I can check it.
-- **[v2]** Refresh when I open the tool if the data is more than 10 minutes old, plus one scheduled refresh a day. Cached data shows straight away while the refresh runs in the background, and the page updates when it finishes. Opening the tool never waits on ingest or the model.
+- Source: the NBA's official injury report, a PDF table republished every 15 minutes on game days at `ak-static.cms.nba.com/referee/injury/Injury-Report_YYYY-MM-DD_HH_MM{AM|PM}.pdf`. It needs a browser-like User-Agent. No reports are published in preseason.
+- Parsed by layout, with no language model: rows are grouped by position on the page and columns found from the header. The parser handles reasons that wrap above and below a row, suffixes before the comma ("Lively II, Dereck"), date, matchup and team cells left blank on repeat rows, and teams that haven't yet submitted.
+- Extracts game date, tip-off, matchup, team, player, status (out, doubtful, questionable, probable, available) and reason. Rows with an unknown status become parse warnings, never silent drops.
+- Name matching: names are normalised (order, accents, punctuation, suffixes), then matched to a directory player on the same team, or to a unique name league-wide. Ambiguous or unknown names are kept and listed for review.
+- One update per (player, game). Repeat reports update it and append to its status history (e.g. questionable → out), with first-seen and last-changed times. An older report never overwrites newer data.
+- The original printed row is stored and shown next to each parsed update, with its report time.
+- **[built]** The feed is grouped by game. Every game is a dropdown, closed by default, ordered by tip-off from earliest to latest, under day headings. The summary line shows tip-off, out/doubtful/questionable/probable counts, and markers when my players are involved or gain. Inside, updates are grouped by team (away first), worst status first, G League and two-way assignments last. This replaced the v2 layout ("new and changed first, unchanged absences collapsed by team").
+- My players are pinned above the games ("Your players"), along with my players named as gaining ("Your players who gain").
+- **[built]** Times are shown in my time zone, detected from the browser and kept in sync when I travel, or chosen by hand.
+- Updates for games already played are archived; `/?date=YYYY-MM-DD` shows a past game day.
+- Refresh: saved data shows straight away. If the last check is over 10 minutes old, the page fetches the newest report in the background and reloads. **[built]** A **Refresh** button fetches on demand, at most once a minute. The daily job also checks.
 
 **Acceptance criteria**
 
-- **[v2]** Within 10 minutes of opening the tool, it shows every update in the most recent report the source published.
-- **[v2]** Official report: every row in a day's game-day reports matches a player ID or appears on the review list, and at least 98 in 100 statuses match the source.
-- **[v2]** Free-text source only: posts that are not about availability, such as starting lineups or scores, are tagged or filtered out, and at least 9 in 10 statuses are correct.
+| Criterion | Result |
+| --- | --- |
+| Within 10 minutes of opening the tool, it shows every update in the most recent report | By design: the refresh on open fetches the newest 15-minute report. To confirm on the first live game day |
+| Every row in a day's report matches a player ID or appears on the review list, and at least 98 in 100 statuses match the source | 2026-03-15 5:00 PM report: 142 of 142 rows parsed (checked by hand against the raw PDF), 9 of 9 not-submitted teams found, 126 matched, the 16 others listed for review (all roster changes since March, not format errors). Statuses are read verbatim from a fixed column |
+| Free-text source criteria | Not applicable: the source is the official report |
 
 ## Feature 3: Next-up inference
 
-For every player ruled out, the tool names who is likely to gain minutes or usage and gives a one-line reason. **[v2]** For every player returning, it names who is likely to lose minutes.
+For every player ruled out (out or doubtful), the tool names who is likely to gain minutes or usage and gives a one-sentence reason. For every player returning, it names who is likely to lose minutes.
 
-This is a judgement call, not a projection, and it does not need stats to justify it. Example: if Cooper Flagg sits, Naji Marshall gains as the likely starter in his place, and Risacher gains as a player sharing that position.
+**Requirements (as built)**
 
-**Requirements**
+- **Depth chart from box scores:**
+  - The window is the team's last 10 games, from the current season once it has 3 games, excluding preseason.
+  - A starter is a player who started at least half the games he played in the window. Order within a position follows minutes per game.
+  - Players new to a team use their recent minutes with their previous team.
+- **Candidate rules, in order:**
+  1. For a starter, the bench player who started most often when he sat (in the team's last 20 games), or failing that the top bench player at his position.
+  2. Bench players at his position.
+  3. Starters at his position or a neighbouring one (G↔F↔C) who take on more usage.
 
-- Generate one to three beneficiaries per absent player.
-- **[v2]** Candidate rules, in order:
-  1. Next man at the position: the bench player who most often starts when this starter sits, or failing that the highest-minute bench player at the same position.
-  2. Bench players who share the position.
-  3. Starters at a neighbouring position who take on more usage, for example the main ball handler when a guard sits.
-- A free-tier language model orders the candidates and writes the one-line reason. If the model is unavailable, the rule output is shown as is.
-- **[v2]** The model's answer is accepted only if every name it returns is one of the rule candidates. Any other name means the rule output is shown instead.
-- **[v2]** The depth chart comes from box scores, not a depth-chart site. Starters are whoever started most of the team's last 10 games, and the order within each position follows minutes per game over the same games. A player traded mid-season is grouped with his new team from his first game there. Before he has played a game for them, he is placed by position.
-- Label each beneficiary by type: direct replacement in the starting lineup, more minutes off the bench, or more usage for an existing starter.
-- Mark each beneficiary with the teams of mine he is on, or as watchlisted or unowned.
-- When several players on one NBA team are out, reason about them together rather than one at a time.
-- **[v2]** Inference is stored per (NBA team, game, set of absent players). The model is called again only when that set changes, such as a new absence or a return. The result covers every absent player on that team at once.
-- **[v2]** Out and doubtful players are never named as beneficiaries. Questionable players can be named but carry a "questionable" flag.
-- **[v2]** Returns: when a player moves from out or doubtful to probable or available, run the same rules in reverse and name one to three players likely to lose minutes. Label them "loses minutes on return."
+  The rules supply about 6–8 candidates. The rule answer is the strongest of each type, up to three.
+- **Returns:** a player moving from out or doubtful to probable or available, within a game or since his previous game. Losers are players who started more while he sat, plus backups at his position.
+- **Model:** Gemini `gemini-3.5-flash-lite` (free tier) orders the candidates and writes the reasons. It sees the depth chart and each candidate's rule note (e.g. "started 3 of the 4 games he missed").
+  - Any name not among that player's candidates is rejected.
+  - A player the model leaves without a valid call gets the rule answer.
+  - Reasons are cut to one sentence; initials such as "P.J." are kept.
+  - Malformed JSON is retried once.
+- **Storage:** one answer per (NBA team, game, set of absent and returning players). The model is called again only when that set changes.
+- **[built] Free-tier rate limits:** at most 8 model calls per refresh, and the model stops for the rest of the run at the first 429. Remaining games get the rule answer straight away and are upgraded on a later refresh, up to 3 model attempts.
+- Out and doubtful players are never named; questionable players are flagged; G League assignments are not treated as absences.
+- Each call is labelled: into the starting lineup, more bench minutes, more usage, or loses minutes. Ownership is marked as my team names, Watchlist or Unowned.
 
 **Acceptance criteria**
 
-- Every out or doubtful update has at least one named beneficiary and a reason of one sentence.
-- No beneficiary is a player who is himself listed as out or doubtful for the same game.
-- **[v2]** Backtest on 15–20 past absences from the current or previous season. In at least 70% of absences, at least one named beneficiary plays more minutes in that game than his 14-game average.
-- The Cooper Flagg example names Marshall and Risacher, or explains why not, without any extra prompting.
+| Criterion | Result |
+| --- | --- |
+| Every out or doubtful update has at least one named beneficiary with a one-sentence reason | Rules fall back to the busiest available player when no positional candidate exists. The model never leaves an absent player uncovered |
+| No beneficiary is himself out or doubtful for the same game | Excluded before candidates are built; the model can only pick from candidates. Unit-tested |
+| Backtest: in at least 70% of 15–20 past absences, a named beneficiary beats his 14-game minutes average | 20 regular-starter absences from 2025-26, using only earlier box scores: **rules 18/20 (90%)**, **rules + model 18/20 (90%)**. Both misses are honest: one named replacement also sat that night (unknowable without that night's report), one where everyone named played slightly below average |
+| The Cooper Flagg example names Marshall and Risacher, or explains why not | With the 2026-27 Dallas roster: Risacher into the starting lineup, Marshall more usage |
 
 ## Feature 4: Recent player stats
 
-Where data is available, any player in the tool shows averages over his last 7, 14 and 30 games next to his season average.
+**Requirements (as built)**
 
-**Requirements**
-
-- Windows are counted in games played, not calendar days, so a player returning from injury is not shown with an empty week.
-- **[v2]** Windows use the current regular season only. Early in the season they show what exists, with the game count.
-- Show minutes, points, rebounds, assists, steals, blocks, threes made, turnovers, field goal % and free throw %. **[v2]** Also show field goal attempts and free throw attempts per game.
-- **[v2]** Percentages are total makes divided by total attempts across the window, never the average of each game's percentage.
-- Show the season average beside each window so a rise or fall is obvious.
-- Stats appear on rostered players, watchlisted players and every beneficiary named by the next-up inference.
-- If a player has fewer games than the window, show what exists and state the game count.
-- If stats cannot be fetched, the rest of the tool still works and the stats panel says so.
-- **[v2]** Game logs are fetched league-wide, one request per date where the source allows it, and stored. Windows are computed from the stored logs, not fetched per player.
+- Averages over the last 7, 14 and 30 games played, next to the season average, computed in Postgres (`player_stat_windows`) from stored box scores.
+- **[built]** "Current season" is the latest regular season with games stored, labelled e.g. "2025-26". Before 2026-27 starts the panels show 2025-26, and they switch automatically after the first regular-season game is loaded.
+- Columns: games played, minutes, points, rebounds, assists, steals, blocks, threes made, turnovers, FG% and FT%, with FGA and FTA per game in brackets.
+- Percentages are total makes divided by total attempts over the window.
+- A collapsed line shows recent form ("Last 14: 25.6 pts · 2.9 reb · 8.1 ast · 35.9 min"), opening into the full table. Green or red marks a window clearly above or below the season (10% for counting stats, 3 points for percentages, turnovers reversed, at least 3 games).
+- Shown on rostered players and the watchlist (Teams page), and on my players and every next-up name (feed).
+- Short windows show their real game count. Players without games show "No games played in 2025-26 yet". If stats can't load, the panel says so and the rest of the page works.
+- Game logs are loaded league-wide, one scoreboard call plus one call per game for each date, and stored.
+- **[built]** ESPN labels the All-Star games and the NBA Cup championship as "regular season". Both are tagged by competition type and left out of stats, matching official numbers. Cup group games, quarterfinals and semifinals count.
 
 **Acceptance criteria**
 
-- Stats reflect games completed the previous night by the next morning. **[v2]** The daily job is scheduled around 10:00 UTC, after the last West Coast games finish. Refresh-on-open is the backstop because Vercel Hobby cron timing is imprecise.
-- Averages match the box scores on a reference site for a spot-checked sample of 5 players.
+| Criterion | Result |
+| --- | --- |
+| Stats reflect the previous night's games by the next morning | The daily job at 10:00 UTC loads yesterday's box scores; verified on the live site |
+| Averages match a reference for 5 spot-checked players | `npm run spot-check-stats`: Flagg, Gilgeous-Alexander, Jokić, Brunson and Marshall all match ESPN's official 2025-26 averages (Brunson's 74 games and 26.0 points independently confirmed). Minutes can differ by under 0.1 because box scores give whole minutes |
 
-## Data sources and risks
+## Data sources
 
-Every source must be free. That rules out the official X API and makes the news feed the weakest part of the tool.
-
-| Need | Option | What to know |
+| Need | Source | Notes |
 | --- | --- | --- |
-| Injury news | NBA's official injury report | **[Phase 0]** v1 source. A PDF table republished every 15 minutes on game days at a predictable URL. Parsed by layout, with no language model needed. Works from Vercel. |
-| Injury news | Injury pages on free sports sites | Free to read. Scraping may breach their terms and breaks when pages change. Fallback only. |
-| Injury news | Underdog NBA via the official X API | Ruled out: pay-per-use at $0.005 per post read. [X pricing](https://docs.x.com/x-api/getting-started/pricing) |
-| Injury news | Scraping the X profile page | Free but fragile, needs a logged-in session and is likely against X's terms. Not recommended. |
-| Depth charts | **[v2]** Built from box scores (ESPN) | **[v2]** Starters and minutes order come from stored game logs, so no separate source is needed. The cost is that Phase 3 now depends on the stats source. |
-| Player directory | **[Phase 0]** ESPN public site API, team roster endpoints | Needed for autocomplete, stable IDs, positions and trades. Refreshed daily. Positions come as one letter (G, F, C). Undocumented API: lower terms risk than scraping, but not zero. |
-| Player stats | **[Phase 0]** ESPN public site API, scoreboard and box-score endpoints | One scoreboard call plus one call per game covers a whole night, with a starter flag. `nba_api` timed out and balldontlie charges for box scores, so both are ruled out. |
-| Next-up inference | Depth-chart rules plus a language model on a free tier | Rules pick candidates and always work. The model adds ordering and reasons, one call per (team, game, set of absent players). **[Phase 0]** Gemini `gemini-3.5-flash-lite` on the free tier with no card, through an OpenAI-compatible adapter, so Groq is a settings swap. |
-| Hosting | Vercel Hobby for the app and functions | Free. Scheduled jobs run once a day at most, at an imprecise time, so the tool also refreshes on open. [Vercel cron limits](https://vercel.com/docs/cron-jobs/usage-and-pricing) |
-| Database | Supabase Free | Holds teams, rosters, parsed updates and cached stats. A free project is paused after 7 days of low activity and can be restored for 90 days. [Supabase pausing](https://supabase.com/docs/guides/platform/free-project-pausing.md) |
+| Injury news | NBA official injury report (PDF) | Every 15 minutes on game days; works from Vercel; browser-like User-Agent needed |
+| Player directory | ESPN public site API, team rosters | Stable IDs, positions, two-way players. Undocumented API |
+| Box scores (stats and depth charts) | ESPN public site API, scoreboard and game summary | Starter flag, full counting stats, season type and competition type |
+| Secondary injury feed | ESPN public site API | Checked in Phase 0; not used by the app yet |
+| Next-up reasoning | Gemini `gemini-3.5-flash-lite`, OpenAI-compatible endpoint | Free tier, about 8–10 calls a minute. Groq is a drop-in swap through settings |
+| Hosting | Vercel Hobby | One cron job a day (10:00 UTC, imprecise timing) |
+| Database | Supabase Free | Pauses after 7 idle days; the daily job keeps it active |
 
-**Cost rule.** Nothing in the tool may need a card on file. If a source starts charging, it is swapped out, not paid for.
+**Ruled out in Phase 0:** `stats.nba.com` / `nba_api` (timed out even from a home connection), `cdn.nba.com` live data (403 on every request), balldontlie (box scores cost $9.99 a month), the X API ($0.005 per post read).
 
-**Other risks**
+**Cost rule.** Nothing needs a card on file. If a source starts charging, it is swapped out, not paid for.
 
-- Slower news: free sources trail Underdog, so some late scratches will be missed before tip-off.
-- Parsing errors: a misread status leads to a bad start or sit decision. Showing the original text beside the parsed update limits the damage.
-- Stale depth charts: the inference is only as good as the roster data it is given. **[v2]** Building the depth chart from box scores lags rotation changes by a game or two. A player's first game after a trade is the weakest case.
-- Free tiers change: limits can tighten or vanish, so each source should be easy to swap.
-- **[v2]** Off-season pause: the daily job runs all year, including the off-season, so the project should never sit idle for 7 days. **[verify]** Check that a database query from the job counts as activity for Supabase.
+## Risks and known limitations
 
-## MVP scope and phasing
+- **Slower news:** the official report trails Underdog, so some late scratches will be missed before tip-off.
+- **Early-season depth charts:** until each team has about 10 games (about three weeks), depth charts lean on last season's final games and new arrivals' old-team minutes. Early calls rely more on the model's own knowledge.
+- **Box-score lag:** depth charts lag rotation changes by a game or two. A player's first game after a trade is the weakest case.
+- **Unofficial ESPN API:** it is free and keyless but undocumented, so it could change without notice. Each source sits behind its own adapter for easy swapping.
+- **Free tiers change:** Gemini's per-minute limit already shapes the refresh budget, and limits can tighten again.
+- **Email sign-in:** the built-in sender is rate limited; `npm run login-link` is the workaround. A custom SMTP sender (e.g. Resend's free tier) would fix it for good.
+- **Supabase pause:** the daily job runs all year, so the project should never sit idle for 7 days. **[verify]** that a scheduled query counts as activity.
 
-The MVP is the smallest version that answers "who is out and who benefits" for my team. **[v2]** The inference now reads its depth chart from stored game logs, so stats ingestion moves ahead of next-up. Only the stats display stays in Phase 4.
+## Phasing
 
-| Phase | What ships | Done when |
-| --- | --- | --- |
-| **[v2]** 0. Data spike | Confirm free, card-free sources for the player directory, game logs (called from a Vercel function) and the injury report. Pick the language model. | Each source returns real data from a deployed Vercel function, and the choices are written into this PRD. |
-| 1. Teams | Login. Create teams. Add, remove and persist players on each. Watchlist. Daily player directory refresh. | I can rebuild all my teams in the tool in under 10 minutes. |
-| 2. Feed | Ingest reports from one free source and parse them into structured updates. **[v2]** Ingest and store league-wide game logs. | **[v2]** The Feature 2 accuracy criterion for the chosen source is met on one game day. |
-| 3. Next-up | Beneficiaries, reasons and return losers for each changed status, flagged against all my teams. | **[v2]** The backtest meets the Feature 3 target, and the Cooper Flagg example names sensible players. |
-| 4. Stats | Last 7, 14 and 30 game averages with season comparison. | Numbers match a reference site on a 5-player spot check. |
-| Later | Syncing rosters from the fantasy platforms. Category advice per league format. | Out of scope for now. |
+| Phase | What shipped | Done when | Result |
+| --- | --- | --- | --- |
+| 0. Data spike | Source adapters; `/api/spike` and `npm run spike` checks | Each source returns real data from a deployed Vercel function | Passed from Vercel iad1 |
+| 1. Teams | Login, teams, rosters, watchlist, daily player sync | Rebuild all teams in under 10 minutes | Met |
+| 2. Feed | Report ingest, history, matching, game-grouped feed, time zones, refresh, archive; league-wide game logs (2025-26 backfilled: 1,327 games, 34,881 player lines) | Feature 2 accuracy criterion met on one game day | Met on 2026-03-15 data; live confirmation pending |
+| 3. Next-up | Depth charts, rules, model, storage, return calls, feed display, backtest | Backtest meets 70% and the Flagg example is sensible | 90% / 90%; Flagg example passes |
+| 4. Stats | Stat windows, panels on Teams and feed, All-Star and Cup final exclusion, spot check | 5-player spot check matches a reference | 5 of 5 |
+| Later | Roster sync from fantasy platforms; category advice per league format; alerts | Out of scope for v1 | |
 
-## Open questions
+## Open items
 
-- [ ] ~~How many roto teams are there, and which categories does each roto league count?~~ **[v2]** Deferred: nothing in v1 depends on league format.
-- [x] ~~Does Underdog NBA publish anywhere with a free feed, or is the official injury report the v1 source?~~ **[Phase 0]** The official report is the v1 source.
-- [x] ~~Which free-tier language model, and what are its daily limits? Does it need a card on file?~~ **[Phase 0]** Gemini `gemini-3.5-flash-lite`, no card. Daily limits are shown in AI Studio.
-- [x] ~~Which free source supplies depth charts, and how often does it update?~~ **[v2]** Built from box scores (see Feature 3).
-- [x] ~~Which free source supplies the player directory and game logs, and does it work from Vercel?~~ **[Phase 0]** ESPN's public site API, which works from Vercel.
-- [x] ~~What is the official injury report's publishing schedule on game days?~~ **[Phase 0]** Every 15 minutes.
+- [ ] On the first regular-season game day (about Oct 20), run `/api/spike` and confirm `nba.injuryReport.latest` passes rather than skips, and that the feed fills within 10 minutes of opening.
+- [ ] **[verify]** Supabase counts the daily job's queries as activity (no pause over a quiet week).
+- [ ] After about three weeks of the season, re-run `npm run backtest-nextup -- --season 2027` on 2026-27 data.
+- [x] ~~Which source for injury news, depth charts, the player directory and stats; which model; the report's schedule?~~ Resolved in Phase 0 (see Data sources).
+- [ ] ~~How many roto teams, and which categories?~~ Deferred: nothing in v1 depends on league format.
 
-## Changelog from v1 **[v2]**
+## Change history
 
-Numbers refer to the review points. Point 1 is gone: it questioned whether Risacher plays for Dallas, but he joined the Mavericks in a three-team trade, so the example stands.
+**v1 → v2 (review, Oct 4, 2026).** Twenty-three changes from a pre-build review:
+- inference stored per (team, game, absent set)
+- a third candidate rule for starter usage
+- "unowned" instead of "available to pick up"
+- feed criteria for the official report
+- depth charts built from box scores, with game logs moved to Phase 2
+- a Phase 0 data spike
+- an Access section
+- return calls
+- merging per (player, game) with history
+- collapsing long-term absences
+- name normalisation and a review list
+- a player directory requirement
+- model output restricted to candidates
+- out and doubtful excluded, questionable flagged
+- positions from the directory
+- background refresh
+- a backtest target
+- percentages as makes over attempts
+- current-season windows
+- cron at 10:00 UTC
+- the format field as a label only
+- a year-round daily job
+- no card for the model
 
-| # | Issue | Change |
-| --- | --- | --- |
-| 2 | Storing the model result per update clashes with reasoning about teammates together | Inference is stored per (team, game, set of absent players) |
-| 3 | No rule produces the "more usage for a starter" type | Third candidate rule added |
-| 4 | Summary promised "available to pick up" | Reworded to "on my teams or watchlist" |
-| 5 | Feed criteria written for tweets | Separate criteria for the official report and for free-text sources |
-| 6 | No depth chart source | Built from box scores; game-log ingestion moved to Phase 2 |
-| 7 | Stats source unverified | New Phase 0 data spike |
-| 8 | No access control | New Access section |
-| 9 | Returns not handled | Return losers added to Feature 3 |
-| 10 | Merge rule undefined | Merge key is (player, game), with status history kept |
-| 11 | Long-term injuries crowd the feed | Changed statuses first, unchanged ones collapsed, updates archived after the game |
-| 12 | Name matching unspecified | Normalisation rules and a review list |
-| 13 | No player directory source | Directory requirement and open question added |
-| 14 | Model output unchecked | Model names must come from the rule candidates |
-| 15 | "Out" undefined for beneficiaries | Out and doubtful excluded; questionable flagged |
-| 16 | Positions undefined | NBA-listed position from the directory |
-| 17 | Refresh-on-open could stall | Cached data first, refresh in the background |
-| 18 | Phase 3 test was subjective | Backtest target added |
-| 19 | Percentage averages ambiguous | Makes ÷ attempts; FGA and FTA shown |
-| 20 | Early-season windows undefined | Current regular season only |
-| 21 | Cron timing | Scheduled around 10:00 UTC, refresh-on-open as backstop |
-| 22 | Format field unused | Label only; roto question deferred |
-| 23 | Off-season pause | Daily job runs all year **[verify]** |
-| 24 | Card on file for the model | Added to the open question **[verify]** |
+**v2 → v3 (build, Oct 4, 2026).**
+
+| Area | Decision |
+| --- | --- |
+| Sign-in | Added `login-link` script to bypass the email rate limit; sign-ups disabled |
+| Feed layout | Grouped by game in closed dropdowns ordered by tip-off, replacing "new and changed first / unchanged collapsed"; my players stay pinned |
+| Time zone | Auto-detected from the browser or chosen by hand; applied to every time shown |
+| Refresh | Manual Refresh button, at most once a minute; automatic refresh stays at 10 minutes |
+| Archive | `/?date=` shows any past game day |
+| Next-up candidates | Widened to about 6–8 per player so the model has real choice; rule notes shown to the model (lifted the model's backtest from 16/20 to 18/20) |
+| Model limits | At most 8 calls per refresh, stop at the first 429, retry later up to 3 times |
+| Depth window | Current season once it has 3 games; otherwise the most recent games |
+| Stats season | "Current" means the latest regular season with games stored |
+| Official games | All-Star games and the NBA Cup final excluded from stats (found by the spot check) |
+| Data quality | ESPN's unidentified "did not play" placeholder rows are skipped |
+| Database | `returning` is reserved in Postgres, so the column is `is_returning` |
