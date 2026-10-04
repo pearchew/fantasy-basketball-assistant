@@ -153,8 +153,10 @@ function update(over: Partial<FeedUpdate>): FeedUpdate {
     reportTime: "2026-11-02T17:00:00Z",
     changedAt: "2026-11-02T17:00:00Z",
     ongoing: false,
+    returning: false,
     history: [{ status: "out", reason: "", report_time: "" }],
     heldOn: [],
+    nextUp: null,
     ...over,
   };
 }

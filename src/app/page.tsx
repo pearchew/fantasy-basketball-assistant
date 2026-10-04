@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AppHeader } from "@/components/AppHeader";
-import { AutoRefresh } from "@/components/AutoRefresh";
-import { StatusBadge, UpdateItem } from "@/components/UpdateItem";
+import { RefreshControls } from "@/components/RefreshControls";
+import { OwnerTags, StatusBadge, TYPE_LABEL, UpdateItem } from "@/components/UpdateItem";
 import { isStale, loadFeed, type FeedUpdate } from "@/lib/feed";
 import { ago, easternClock, gameDayLabel } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
@@ -57,7 +57,7 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
             : "No report loaded yet"}
         </span>
         {state.lastSuccessAt && <span>· checked {ago(state.lastSuccessAt)}</span>}
-        {!archiveDate && <AutoRefresh stale={isStale(state)} />}
+        {!archiveDate && <RefreshControls stale={isStale(state)} />}
       </p>
       {archiveDate && (
         <p className="mt-2 rounded-lg bg-accent-soft p-3 text-sm">
@@ -74,6 +74,28 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
           <p className="rounded-xl border border-border bg-surface p-6 text-center text-sm text-muted">
             {archiveDate ? "No injury updates stored for that day." : "No injury updates for upcoming games. The NBA publishes reports on game days."}
           </p>
+        )}
+
+        {feed.opportunities.length > 0 && (
+          <Section title="Your players who gain" hint="Named as next up because a teammate is out.">
+            <ul className="divide-y divide-border">
+              {feed.opportunities.map(({ call, because }) => (
+                <li key={`${because[0].gameDate}|${call.player_id}`} className="py-3 text-sm">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="font-medium">{call.name}</span>
+                    <span className="text-xs text-muted">{TYPE_LABEL[call.type]}</span>
+                    <OwnerTags heldOn={call.heldOn} />
+                    {call.questionable && <StatusBadge status="questionable" />}
+                  </span>
+                  <span className="block text-muted">
+                    {because.map((u) => `${u.playerName} ${u.status}`).join(", ")} · {because[0].matchup} ·{" "}
+                    {gameDayLabel(because[0].gameDate, today)}
+                  </span>
+                  <span className="block">{call.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </Section>
         )}
 
         {feed.mine.length > 0 && (
@@ -110,6 +132,9 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
                     <span key={u.id}>
                       {i > 0 && ", "}
                       {u.playerName} <StatusBadge status={u.status} /> <span className="text-muted">{u.reason}</span>
+                      {u.nextUp && u.nextUp.length > 0 && (
+                        <span className="text-muted"> → {u.nextUp.map((b) => b.name).join(", ")}</span>
+                      )}
                     </span>
                   ))}
                 </li>

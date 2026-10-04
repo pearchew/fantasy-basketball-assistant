@@ -1,4 +1,4 @@
-import type { FeedUpdate } from "@/lib/feed";
+import type { FeedUpdate, NextUpCall } from "@/lib/feed";
 import { easternClock, gameDayLabel } from "@/lib/format";
 import { easternDate } from "@/lib/time";
 
@@ -11,6 +11,53 @@ const STATUS_STYLE: Record<FeedUpdate["status"], string> = {
 };
 
 const label = (s: string) => s[0].toUpperCase() + s.slice(1);
+
+export const TYPE_LABEL: Record<NextUpCall["type"], string> = {
+  starter_replacement: "Into the starting lineup",
+  bench_minutes: "More bench minutes",
+  starter_usage: "More usage",
+  loses_minutes: "Loses minutes",
+};
+
+export function OwnerTags({ heldOn }: { heldOn: string[] }) {
+  if (!heldOn.length) return <span className="text-xs text-muted">Unowned</span>;
+  return (
+    <>
+      {heldOn.map((t) => (
+        <span key={t} className="rounded bg-accent-soft px-1.5 py-0.5 text-xs text-accent">
+          {t}
+        </span>
+      ))}
+    </>
+  );
+}
+
+function NextUp({ u }: { u: FeedUpdate }) {
+  if (!u.nextUp) return null;
+  const title = u.returning ? "With him back, losing minutes:" : "Next up:";
+  return (
+    <div className="mt-2 rounded-lg bg-background px-3 py-2">
+      <p className="text-xs font-medium tracking-wide text-muted uppercase">{title}</p>
+      {u.nextUp.length === 0 ? (
+        <p className="mt-1 text-sm text-muted">Working out who benefits; refresh in a moment.</p>
+      ) : (
+        <ul className="mt-1 space-y-1.5">
+          {u.nextUp.map((b) => (
+            <li key={b.player_id} className="text-sm">
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-medium">{b.name}</span>
+                <span className="text-xs text-muted">{TYPE_LABEL[b.type]}</span>
+                <OwnerTags heldOn={b.heldOn} />
+                {b.questionable && <StatusBadge status="questionable" />}
+              </span>
+              <span className="text-muted">{b.reason}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export function StatusBadge({ status }: { status: FeedUpdate["status"] }) {
   return <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${STATUS_STYLE[status]}`}>{label(status)}</span>;
@@ -26,13 +73,11 @@ export function UpdateItem({ u, today }: { u: FeedUpdate; today: string }) {
         <span className="text-sm text-muted">
           {u.teamAbbr ?? u.teamName} · {u.matchup} · {gameDayLabel(u.gameDate, today)} {u.gameTime}
         </span>
-        {u.heldOn.map((t) => (
-          <span key={t} className="rounded bg-accent-soft px-1.5 py-0.5 text-xs text-accent">
-            {t}
-          </span>
-        ))}
+        {u.returning && <span className="text-xs font-medium text-accent">Returning</span>}
+        {u.heldOn.length > 0 && <OwnerTags heldOn={u.heldOn} />}
       </div>
       {u.reason && <p className="mt-1 text-sm">{u.reason}</p>}
+      <NextUp u={u} />
       <details className="mt-1 text-xs text-muted">
         <summary className="cursor-pointer select-none">
           {trail.length > 1 ? `${trail.join(" → ")} · ` : ""}changed {gameDayLabel(easternDate(new Date(u.changedAt)), today).toLowerCase()} {easternClock(u.changedAt)} · report text

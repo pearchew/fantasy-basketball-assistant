@@ -2,7 +2,7 @@
 
 A personal tool that watches NBA injury news and tells me which players stand to gain. See [docs/PRD.md](docs/PRD.md).
 
-**Status:** Phase 2 (injury feed). Phase 0 findings are in [docs/phase-0-findings.md](docs/phase-0-findings.md).
+**Status:** Phase 3 (next-up inference). Phase 0 findings are in [docs/phase-0-findings.md](docs/phase-0-findings.md).
 
 ## Stack
 
@@ -36,6 +36,12 @@ npm run dev
 ## How the feed refreshes
 
 Opening the feed shows saved data straight away. If the last check is over 10 minutes old, the page calls `POST /api/refresh`, which fetches the newest official report (published every 15 minutes on game days), merges it into one row per player and game, and reloads the page. The server allows one fetch per 10 minutes however often the page is opened. `/?date=YYYY-MM-DD` shows a past game day from the archive.
+
+## Next-up inference
+
+For each team-game with someone out, doubtful or returning, rules build a depth chart from the team's last 10 box scores (current season once it has 3 games) and pick candidates: whoever started when the player sat, bench players at his position, then starters at or next to it. Gemini orders them and writes the reasons; any name outside the candidate list is rejected and the rule answer is used instead. Answers are stored per (team, game, set of absent and returning players), so the model is called again only when that set changes. Free-tier rate limits: at most 8 model calls per refresh; the rest get the rule answer and are upgraded on a later refresh.
+
+`npm run backtest-nextup` (add `-- --model` to include Gemini) replays 20 past starter absences from 2025-26 and checks whether a named player beat his 14-game minutes average. Oct 4, 2026: rules 18/20, rules + model 18/20; target 14/20.
 
 ## Phase 0 check on Vercel
 

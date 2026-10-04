@@ -11,7 +11,8 @@
     "spike": "tsx --env-file-if-exists=.env.local scripts/spike.mts",
     "sync-players": "tsx --env-file-if-exists=.env.local scripts/sync-players.mts",
     "login-link": "tsx --env-file-if-exists=.env.local scripts/login-link.mts",
-    "backfill-logs": "tsx --env-file-if-exists=.env.local scripts/backfill-logs.mts"
+    "backfill-logs": "tsx --env-file-if-exists=.env.local scripts/backfill-logs.mts",
+    "backtest-nextup": "tsx --env-file-if-exists=.env.local scripts/backtest-nextup.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

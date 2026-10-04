@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { HistoryItem } from "./injuryIngest";
+import type { Beneficiary } from "./nextUp/rules";
+import { groupsFromUpdates, type GroupUpdate } from "./nextUp/store";
 import type { InjuryStatus } from "./sources/nbaInjuryReport";
 import { REFRESH_WINDOW_MS } from "./injuryIngest";
 
@@ -20,10 +22,18 @@ export type FeedUpdate = {
   reportTime: string;
   changedAt: string;
   ongoing: boolean;
+  returning: boolean;
   history: HistoryItem[];
   /** Where I hold this player, if anywhere. */
   heldOn: string[];
+  /** Who gains (or, for a returning player, loses). Null when not applicable; [] while still being worked out. */
+  nextUp: NextUpCall[] | null;
 };
+
+export type NextUpCall = Beneficiary & { heldOn: string[] };
+
+/** A player I hold who gains from someone else's absence. */
+export type Opportunity = { call: NextUpCall; because: FeedUpdate[] };
 
 export type Feed = {
   mine: FeedUpdate[];
@@ -33,6 +43,8 @@ export type Feed = {
   gLeague: FeedUpdate[];
   /** Names the report printed that matched no directory player. */
   unmatched: FeedUpdate[];
+  /** My players named as gaining, soonest game first. */
+  opportunities: Opportunity[];
 };
 
 export type IngestState = {
@@ -50,10 +62,18 @@ export const isGLeague = (u: Pick<FeedUpdate, "reason">) => /^G League/i.test(u.
 
 /** Splits upcoming-game updates into the feed's sections. Every update lands in exactly one. */
 export function buildFeed(updates: FeedUpdate[]): Feed {
-  const feed: Feed = { mine: [], newAndChanged: [], ongoingByTeam: [], gLeague: [], unmatched: [] };
+  const feed: Feed = { mine: [], newAndChanged: [], ongoingByTeam: [], gLeague: [], unmatched: [], opportunities: [] };
+  const opportunities = new Map<string, Opportunity>();
   const ongoing = new Map<string, FeedUpdate[]>();
 
   for (const u of updates) {
+    for (const call of u.nextUp ?? []) {
+      if (!call.heldOn.length || call.type === "loses_minutes") continue;
+      const key = `${u.gameDate}|${call.player_id}`;
+      const o = opportunities.get(key) ?? { call, because: [] };
+      o.because.push(u);
+      opportunities.set(key, o);
+    }
     if (u.heldOn.length) feed.mine.push(u);
     else if (!u.playerId) feed.unmatched.push(u);
     else if (isGLeague(u)) feed.gLeague.push(u);
@@ -64,6 +84,9 @@ export function buildFeed(updates: FeedUpdate[]): Feed {
     } else feed.newAndChanged.push(u);
   }
 
+  feed.opportunities = [...opportunities.values()].sort(
+    (a, b) => a.because[0].gameDate.localeCompare(b.because[0].gameDate) || a.call.name.localeCompare(b.call.name),
+  );
   feed.mine.sort((a, b) => severity(a.status) - severity(b.status) || byChangeThenSeverity(a, b));
   feed.newAndChanged.sort(byChangeThenSeverity);
   feed.gLeague.sort((a, b) => a.teamName.localeCompare(b.teamName) || a.playerName.localeCompare(b.playerName));
@@ -93,6 +116,7 @@ type Row = {
   report_time: string;
   changed_at: string;
   ongoing: boolean;
+  returning: boolean;
   history: HistoryItem[];
 };
 
@@ -104,7 +128,7 @@ export async function loadFeed(
 ): Promise<{ feed: Feed; state: IngestState }> {
   let query = supabase
     .from("injury_updates")
-    .select("id, game_date, game_time, matchup, team_name, team_abbr, player_id, player_name, status, reason, raw_text, report_time, changed_at, ongoing, history")
+    .select("id, game_date, game_time, matchup, team_name, team_abbr, player_id, player_name, status, reason, raw_text, report_time, changed_at, ongoing, returning, history")
     .gte("game_date", fromDate);
   if (onlyDate) query = query.lte("game_date", fromDate);
   const [updates, state, teams, spots, watch] = await Promise.all([
@@ -125,8 +149,32 @@ export async function loadFeed(
   }
   for (const w of watch.data!) heldOn.set(w.player_id, [...(heldOn.get(w.player_id) ?? []), "Watchlist"]);
 
+  // Next-up answers for each team-game's current set of absent and returning players.
+  const rows = updates.data as Row[];
+  const groups = groupsFromUpdates(rows as GroupUpdate[], new Map());
+  const answers = new Map<string, Beneficiary[]>();
+  for (let i = 0; i < groups.length; i += 50) {
+    const r = await supabase.from("next_up").select("group_key, beneficiaries").in("group_key", groups.slice(i, i + 50).map((g) => g.key));
+    if (r.error) throw r.error;
+    for (const a of r.data) answers.set(a.group_key, a.beneficiaries);
+  }
+  const subjectsByGame = new Map<string, { answer: Beneficiary[] | undefined; ids: Set<string> }>();
+  for (const g of groups) {
+    subjectsByGame.set(`${g.gameDate}|${g.team}`, {
+      answer: answers.get(g.key),
+      ids: new Set([...g.absent, ...g.returning].map((s) => s.id)),
+    });
+  }
+  const nextUpFor = (r: Row): NextUpCall[] | null => {
+    const game = r.player_id ? subjectsByGame.get(`${r.game_date}|${r.team_abbr}`) : undefined;
+    if (!game || !game.ids.has(r.player_id!)) return null;
+    return (game.answer ?? [])
+      .filter((b) => b.for_ids.includes(r.player_id!))
+      .map((b) => ({ ...b, heldOn: heldOn.get(b.player_id)?.slice().sort() ?? [] }));
+  };
+
   const feed = buildFeed(
-    (updates.data as Row[]).map((r) => ({
+    rows.map((r) => ({
       id: r.id,
       gameDate: r.game_date,
       gameTime: r.game_time,
@@ -141,8 +189,10 @@ export async function loadFeed(
       reportTime: r.report_time,
       changedAt: r.changed_at,
       ongoing: r.ongoing,
+      returning: r.returning,
       history: r.history,
-      heldOn: (r.player_id && heldOn.get(r.player_id)?.sort()) || [],
+      heldOn: (r.player_id && heldOn.get(r.player_id)?.slice().sort()) || [],
+      nextUp: nextUpFor(r),
     })),
   );
   const s = state.data;

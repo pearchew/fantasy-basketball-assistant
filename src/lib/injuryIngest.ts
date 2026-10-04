@@ -7,6 +7,8 @@ import { addDays, parseReportTime } from "./time";
 
 /** At most one fetch of the report per window, however often the app is opened. */
 export const REFRESH_WINDOW_MS = 10 * 60_000;
+/** A refresh I ask for by hand may run sooner, but not more than once a minute. */
+export const MANUAL_REFRESH_WINDOW_MS = 60_000;
 
 export type DirectoryEntry = { espn_id: string; name_key: string; team_abbr: string | null };
 
@@ -28,13 +30,18 @@ export type UpdateRow = {
   first_seen_at: string;
   changed_at: string;
   ongoing: boolean;
+  /** Moved from out/doubtful to probable/available, within this game's reports or since his previous game. */
+  returning: boolean;
   history: HistoryItem[];
 };
 
 export type ExistingUpdate = Pick<
   UpdateRow,
-  "update_key" | "status" | "reason" | "report_time" | "first_seen_at" | "changed_at" | "history" | "ongoing"
+  "update_key" | "status" | "reason" | "report_time" | "first_seen_at" | "changed_at" | "history" | "ongoing" | "returning"
 >;
+
+const ABSENT: InjuryStatus[] = ["out", "doubtful"];
+const PLAYING: InjuryStatus[] = ["probable", "available"];
 
 /** A player's update for an earlier game, used to spot ongoing absences. */
 export type PriorUpdate = { player_id: string; game_date: string; status: InjuryStatus; reason: string };
@@ -104,6 +111,12 @@ export function planInjuryUpserts(input: {
     const ongoing = !!earlier && earlier.status === e.status && earlier.reason === e.reason;
     const isChange = !prev || prev.status !== e.status || prev.reason !== e.reason;
     if (isChange) changed++;
+    const history = isChange
+      ? [...(prev?.history ?? []), { status: e.status, reason: e.reason, report_time: reportTime }]
+      : prev!.history;
+    const returning =
+      PLAYING.includes(e.status) &&
+      (history.some((h) => ABSENT.includes(h.status)) || (!!earlier && ABSENT.includes(earlier.status)));
 
     rows.push({
       update_key: key,
@@ -121,9 +134,8 @@ export function planInjuryUpserts(input: {
       first_seen_at: prev?.first_seen_at ?? reportTime,
       changed_at: isChange ? reportTime : prev!.changed_at,
       ongoing: prev && !isChange ? prev.ongoing : ongoing,
-      history: isChange
-        ? [...(prev?.history ?? []), { status: e.status, reason: e.reason, report_time: reportTime }]
-        : prev!.history,
+      returning: prev && !isChange ? prev.returning : returning,
+      history,
     });
     if (playerId) lastByPlayer.set(playerId, { player_id: playerId, game_date: e.gameDate, status: e.status, reason: e.reason });
   }
@@ -136,8 +148,8 @@ export type IngestResult =
   | { status: "ingested"; url: string; reportTime: string; entries: number; changed: number; unmatched: string[]; warnings: string[] };
 
 /** Claims the refresh window atomically; false if another refresh ran within it. */
-async function claimWindow(admin: SupabaseClient, now: Date): Promise<boolean> {
-  const cutoff = new Date(now.getTime() - REFRESH_WINDOW_MS).toISOString();
+async function claimWindow(admin: SupabaseClient, now: Date, windowMs: number): Promise<boolean> {
+  const cutoff = new Date(now.getTime() - windowMs).toISOString();
   const { data, error } = await admin
     .from("ingest_state")
     .update({ last_attempt_at: now.toISOString() })
@@ -150,12 +162,13 @@ async function claimWindow(admin: SupabaseClient, now: Date): Promise<boolean> {
 
 export async function ingestLatestReport(
   admin: SupabaseClient,
-  { now = new Date(), force = false }: { now?: Date; force?: boolean } = {},
+  { now = new Date(), force = false, manual = false }: { now?: Date; force?: boolean; manual?: boolean } = {},
 ): Promise<IngestResult> {
+  const windowMs = manual ? MANUAL_REFRESH_WINDOW_MS : REFRESH_WINDOW_MS;
   if (force) {
     await admin.from("ingest_state").update({ last_attempt_at: now.toISOString() }).eq("job", "injury_report");
-  } else if (!(await claimWindow(admin, now))) {
-    return { status: "skipped", reason: "refreshed within the last 10 minutes" };
+  } else if (!(await claimWindow(admin, now, windowMs))) {
+    return { status: "skipped", reason: manual ? "refreshed less than a minute ago" : "refreshed within the last 10 minutes" };
   }
 
   try {
@@ -189,7 +202,7 @@ async function ingest(admin: SupabaseClient, now: Date): Promise<IngestResult> {
     dates.length
       ? admin
           .from("injury_updates")
-          .select("update_key, status, reason, report_time, first_seen_at, changed_at, history, ongoing")
+          .select("update_key, status, reason, report_time, first_seen_at, changed_at, history, ongoing, returning")
           .in("game_date", dates)
       : Promise.resolve({ data: [], error: null }),
   ]);
