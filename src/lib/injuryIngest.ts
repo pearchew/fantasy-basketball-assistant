@@ -31,13 +31,13 @@ export type UpdateRow = {
   changed_at: string;
   ongoing: boolean;
   /** Moved from out/doubtful to probable/available, within this game's reports or since his previous game. */
-  returning: boolean;
+  is_returning: boolean;
   history: HistoryItem[];
 };
 
 export type ExistingUpdate = Pick<
   UpdateRow,
-  "update_key" | "status" | "reason" | "report_time" | "first_seen_at" | "changed_at" | "history" | "ongoing" | "returning"
+  "update_key" | "status" | "reason" | "report_time" | "first_seen_at" | "changed_at" | "history" | "ongoing" | "is_returning"
 >;
 
 const ABSENT: InjuryStatus[] = ["out", "doubtful"];
@@ -134,7 +134,7 @@ export function planInjuryUpserts(input: {
       first_seen_at: prev?.first_seen_at ?? reportTime,
       changed_at: isChange ? reportTime : prev!.changed_at,
       ongoing: prev && !isChange ? prev.ongoing : ongoing,
-      returning: prev && !isChange ? prev.returning : returning,
+      is_returning: prev && !isChange ? prev.is_returning : returning,
       history,
     });
     if (playerId) lastByPlayer.set(playerId, { player_id: playerId, game_date: e.gameDate, status: e.status, reason: e.reason });
@@ -202,7 +202,7 @@ async function ingest(admin: SupabaseClient, now: Date): Promise<IngestResult> {
     dates.length
       ? admin
           .from("injury_updates")
-          .select("update_key, status, reason, report_time, first_seen_at, changed_at, history, ongoing, returning")
+          .select("update_key, status, reason, report_time, first_seen_at, changed_at, history, ongoing, is_returning")
           .in("game_date", dates)
       : Promise.resolve({ data: [], error: null }),
   ]);

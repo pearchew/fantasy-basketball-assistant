@@ -1,7 +1,8 @@
 -- Phase 3: next-up inference, stored per (team, game, set of absent and returning players).
 
 -- A player moving from out/doubtful to probable/available, within a game or since his previous game.
-alter table public.injury_updates add column returning boolean not null default false;
+-- ("returning" is reserved in Postgres, hence the prefix.)
+alter table public.injury_updates add column is_returning boolean not null default false;
 
 create table public.next_up (
   id             bigint generated always as identity primary key,

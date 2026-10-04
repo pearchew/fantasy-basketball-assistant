@@ -116,7 +116,7 @@ type Row = {
   report_time: string;
   changed_at: string;
   ongoing: boolean;
-  returning: boolean;
+  is_returning: boolean;
   history: HistoryItem[];
 };
 
@@ -128,7 +128,7 @@ export async function loadFeed(
 ): Promise<{ feed: Feed; state: IngestState }> {
   let query = supabase
     .from("injury_updates")
-    .select("id, game_date, game_time, matchup, team_name, team_abbr, player_id, player_name, status, reason, raw_text, report_time, changed_at, ongoing, returning, history")
+    .select("id, game_date, game_time, matchup, team_name, team_abbr, player_id, player_name, status, reason, raw_text, report_time, changed_at, ongoing, is_returning, history")
     .gte("game_date", fromDate);
   if (onlyDate) query = query.lte("game_date", fromDate);
   const [updates, state, teams, spots, watch] = await Promise.all([
@@ -189,7 +189,7 @@ export async function loadFeed(
       reportTime: r.report_time,
       changedAt: r.changed_at,
       ongoing: r.ongoing,
-      returning: r.returning,
+      returning: r.is_returning,
       history: r.history,
       heldOn: (r.player_id && heldOn.get(r.player_id)?.slice().sort()) || [],
       nextUp: nextUpFor(r),

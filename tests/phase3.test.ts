@@ -134,7 +134,7 @@ describe("oneSentence", () => {
 describe("groupsFromUpdates", () => {
   const u = (over: Partial<GroupUpdate>): GroupUpdate => ({
     game_date: "2026-11-02", matchup: "TST@OTH", team_abbr: "TST", player_id: "sf", player_name: "Star Forward",
-    status: "out", reason: "Injury/Illness - Knee", returning: false, ...over,
+    status: "out", reason: "Injury/Illness - Knee", is_returning: false, ...over,
   });
 
   it("keys a team-game by its sorted absent and returning players, ignoring G League and unmatched rows", () => {
@@ -142,7 +142,7 @@ describe("groupsFromUpdates", () => {
       [
         u({ player_id: "pg", player_name: "Point Guard", status: "doubtful" }),
         u({}),
-        u({ player_id: "g6", player_name: "Sixth Guard", status: "available", returning: true }),
+        u({ player_id: "g6", player_name: "Sixth Guard", status: "available", is_returning: true }),
         u({ player_id: "bf", player_name: "Bench Forward", status: "questionable" }),
         u({ player_id: "two", player_name: "Two Way", reason: "G League - Two-Way" }),
         u({ player_id: null, player_name: "Unknown" }),

@@ -16,7 +16,7 @@ export type GroupUpdate = {
   player_name: string;
   status: InjuryStatus;
   reason: string;
-  returning: boolean;
+  is_returning: boolean;
 };
 
 export type Group = {
@@ -47,7 +47,7 @@ export function groupsFromUpdates(updates: GroupUpdate[], positions: Map<string,
       .filter((u) => (u.status === "out" || u.status === "doubtful") && !/^G League/i.test(u.reason))
       .map((u) => ({ ...subject(u), status: u.status }))
       .sort((a, b) => a.id.localeCompare(b.id));
-    const returning = list.filter((u) => u.returning).map(subject).sort((a, b) => a.id.localeCompare(b.id));
+    const returning = list.filter((u) => u.is_returning).map(subject).sort((a, b) => a.id.localeCompare(b.id));
     if (!absent.length && !returning.length) continue;
     groups.push({
       key: `${gameDate}|${team}|${absent.map((a) => a.id).join(",")}|${returning.map((r) => r.id).join(",")}`,
@@ -151,7 +151,7 @@ async function computeGroup(admin: SupabaseClient, g: Group, useModel: boolean) 
 export async function updateNextUp(admin: SupabaseClient, fromDate: string, { modelBudget = 8 } = {}) {
   const { data: updates, error } = await admin
     .from("injury_updates")
-    .select("game_date, matchup, team_abbr, player_id, player_name, status, reason, returning")
+    .select("game_date, matchup, team_abbr, player_id, player_name, status, reason, is_returning")
     .gte("game_date", fromDate);
   if (error) throw error;
   const ids = [...new Set((updates as GroupUpdate[]).map((u) => u.player_id).filter((id): id is string => !!id))];
