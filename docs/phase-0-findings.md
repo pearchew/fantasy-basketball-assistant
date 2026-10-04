@@ -4,15 +4,15 @@ Oct 4, 2026. Run `npm run spike` to repeat the local checks. `/api/spike` runs t
 
 ## Results
 
-| Check | Local | Vercel | Notes |
+| Check | Local | Vercel (iad1) | Notes |
 | --- | --- | --- | --- |
-| Player directory (ESPN) | Pass | Pending | 30 teams, 605 players; all have a position |
-| Game logs (ESPN box scores) | Pass | Pending | 15 Mar 2026: 7 games, 182 lines; every team has exactly 5 starters |
-| Official injury report, reference PDF | Pass | Pending | 142 entries and 9 not-submitted teams, both matching a hand count |
-| Official injury report, latest | Skip | Pending | Preseason; nothing published in the last 4 hours |
-| Name matching, report to directory | Pass | Pending | 126 of 142 (89%). All 16 misses are roster churn since March, not format errors |
-| ESPN injury feed | Pass | Pending | 60 entries, all with ESPN IDs |
-| Language model, next-up | Pass | Pending | `gemini-3.5-flash-lite`, about 1 s. On the Cooper Flagg example it named Marshall as the starting replacement and Washington for more usage, with no invented names |
+| Player directory (ESPN) | Pass | Pass | 30 teams, 605 players; all have a position |
+| Game logs (ESPN box scores) | Pass | Pass | 15 Mar 2026: 7 games, 182 lines; every team has exactly 5 starters |
+| Official injury report, reference PDF | Pass | Pass | 142 entries and 9 not-submitted teams, both matching a hand count |
+| Official injury report, latest | Skip | Skip | Preseason; nothing published in the last 4 hours |
+| Name matching, report to directory | Pass | Pass | 126 of 142 (89%). All 16 misses are roster churn since March, not format errors |
+| ESPN injury feed | Pass | Pass | 60 entries, all with ESPN IDs |
+| Language model, next-up | Pass | Pass | `gemini-3.5-flash-lite`, about 1 s. On the Cooper Flagg example it named Marshall as the starting replacement and Washington for more usage, with no invented names |
 
 ## Decisions
 
@@ -45,7 +45,8 @@ Oct 4, 2026. Run `npm run spike` to repeat the local checks. `/api/spike` runs t
 
 A busy game day needs a few dozen calls, one per change in the set of absent players on a team.
 
-## Left to do
+## Outcome
 
-1. Deploy to Vercel and run `/api/spike`. Phase 0 is done when every check passes there, which proves Vercel's addresses aren't blocked.
-2. Rerun `nba.injuryReport.latest` on the first game day of the regular season.
+Phase 0 is done. On Oct 4, 2026, every check passed from a Vercel Hobby function in `iad1`, with the same numbers as the local run, so Vercel's addresses are not blocked by any chosen source. The whole run took about 4 s.
+
+One follow-up: on the first regular-season game day, rerun `/api/spike` and confirm `nba.injuryReport.latest` passes rather than skips.

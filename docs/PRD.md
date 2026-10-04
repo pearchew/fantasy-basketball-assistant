@@ -150,14 +150,14 @@ Every source must be free. That rules out the official X API and makes the news 
 
 | Need | Option | What to know |
 | --- | --- | --- |
-| Injury news | NBA's official injury report | Free and authoritative, but published on a fixed schedule and slower than Underdog. Likely v1 source. **[verify]** Format and schedule. |
+| Injury news | NBA's official injury report | **[Phase 0]** v1 source. A PDF table republished every 15 minutes on game days at a predictable URL. Parsed by layout, with no language model needed. Works from Vercel. |
 | Injury news | Injury pages on free sports sites | Free to read. Scraping may breach their terms and breaks when pages change. Fallback only. |
 | Injury news | Underdog NBA via the official X API | Ruled out: pay-per-use at $0.005 per post read. [X pricing](https://docs.x.com/x-api/getting-started/pricing) |
 | Injury news | Scraping the X profile page | Free but fragile, needs a logged-in session and is likely against X's terms. Not recommended. |
-| Depth charts | **[v2]** Built from box scores | **[v2]** Starters and minutes order come from stored game logs, so no separate source is needed. The cost is that Phase 3 now depends on the stats source. |
-| Player directory | **[v2]** Chosen in Phase 0 | **[v2]** Needed for autocomplete, stable IDs, positions and trades. Refreshed daily. |
-| Player stats | A free NBA stats API or library | Game logs are enough to compute every window. **[v2] [verify]** stats.nba.com, which `nba_api` uses, is said to block cloud server addresses, and balldontlie may have moved game logs to a paid tier. Test both from a Vercel function in Phase 0. |
-| Next-up inference | Depth-chart rules plus a language model on a free tier | Rules pick candidates and always work. The model adds ordering and reasons, one call per (team, game, set of absent players). Provider not yet chosen. **[v2] [verify]** The free tier must not need a card on file. |
+| Depth charts | **[v2]** Built from box scores (ESPN) | **[v2]** Starters and minutes order come from stored game logs, so no separate source is needed. The cost is that Phase 3 now depends on the stats source. |
+| Player directory | **[Phase 0]** ESPN public site API, team roster endpoints | Needed for autocomplete, stable IDs, positions and trades. Refreshed daily. Positions come as one letter (G, F, C). Undocumented API: lower terms risk than scraping, but not zero. |
+| Player stats | **[Phase 0]** ESPN public site API, scoreboard and box-score endpoints | One scoreboard call plus one call per game covers a whole night, with a starter flag. `nba_api` timed out and balldontlie charges for box scores, so both are ruled out. |
+| Next-up inference | Depth-chart rules plus a language model on a free tier | Rules pick candidates and always work. The model adds ordering and reasons, one call per (team, game, set of absent players). **[Phase 0]** Gemini `gemini-3.5-flash-lite` on the free tier with no card, through an OpenAI-compatible adapter, so Groq is a settings swap. |
 | Hosting | Vercel Hobby for the app and functions | Free. Scheduled jobs run once a day at most, at an imprecise time, so the tool also refreshes on open. [Vercel cron limits](https://vercel.com/docs/cron-jobs/usage-and-pricing) |
 | Database | Supabase Free | Holds teams, rosters, parsed updates and cached stats. A free project is paused after 7 days of low activity and can be restored for 90 days. [Supabase pausing](https://supabase.com/docs/guides/platform/free-project-pausing.md) |
 
@@ -187,11 +187,11 @@ The MVP is the smallest version that answers "who is out and who benefits" for m
 ## Open questions
 
 - [ ] ~~How many roto teams are there, and which categories does each roto league count?~~ **[v2]** Deferred: nothing in v1 depends on league format.
-- [ ] Does Underdog NBA publish anywhere with a free feed, or is the official injury report the v1 source?
-- [ ] Which free-tier language model, and what are its daily limits? Does it need a card on file?
+- [x] ~~Does Underdog NBA publish anywhere with a free feed, or is the official injury report the v1 source?~~ **[Phase 0]** The official report is the v1 source.
+- [x] ~~Which free-tier language model, and what are its daily limits? Does it need a card on file?~~ **[Phase 0]** Gemini `gemini-3.5-flash-lite`, no card. Daily limits are shown in AI Studio.
 - [x] ~~Which free source supplies depth charts, and how often does it update?~~ **[v2]** Built from box scores (see Feature 3).
-- [ ] **[v2]** Which free source supplies the player directory and game logs, and does it work from Vercel?
-- [ ] **[v2]** What is the official injury report's publishing schedule on game days?
+- [x] ~~Which free source supplies the player directory and game logs, and does it work from Vercel?~~ **[Phase 0]** ESPN's public site API, which works from Vercel.
+- [x] ~~What is the official injury report's publishing schedule on game days?~~ **[Phase 0]** Every 15 minutes.
 
 ## Changelog from v1 **[v2]**
 
