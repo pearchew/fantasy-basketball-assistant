@@ -8,7 +8,9 @@ import {
   type UpdateRow,
 } from "../src/lib/injuryIngest";
 import type { InjuryEntry } from "../src/lib/sources/nbaInjuryReport";
-import { addDays, easternDate, easternToUtc, parseReportTime } from "../src/lib/time";
+import { when } from "../src/lib/format";
+import { timeZoneFrom } from "../src/lib/timezone";
+import { addDays, easternDate, easternToUtc, gameStartUtc, parseReportTime } from "../src/lib/time";
 
 describe("time", () => {
   it("converts Eastern wall-clock times across daylight saving", () => {
@@ -163,30 +165,67 @@ function update(over: Partial<FeedUpdate>): FeedUpdate {
 
 describe("buildFeed", () => {
   const feed = buildFeed([
-    update({ playerName: "Mine Questionable", status: "questionable", heldOn: ["CP"] }),
-    update({ playerName: "Mine Out", heldOn: ["CP", "Watchlist"], ongoing: true }),
-    update({ playerName: "Fresh", changedAt: "2026-11-02T20:00:00Z" }),
-    update({ playerName: "Older", changedAt: "2026-11-02T15:00:00Z" }),
-    update({ playerName: "Long Term", ongoing: true }),
-    update({ playerName: "Long Term Changed", ongoing: true, history: [{ status: "questionable", reason: "", report_time: "" }, { status: "out", reason: "", report_time: "" }] }),
-    update({ playerName: "Two Way", reason: "G League - Two-Way" }),
-    update({ playerName: "Who", playerId: null }),
+    update({ id: 10, playerName: "Late Home", matchup: "LAL@GSW", gameTime: "10:00 (ET)", teamName: "Golden State Warriors", teamAbbr: "GS" }),
+    update({ id: 9, playerName: "Late Away", matchup: "LAL@GSW", gameTime: "10:00 (ET)", teamName: "Los Angeles Lakers", teamAbbr: "LAL" }),
+    update({ id: 1, playerName: "Early Questionable", status: "questionable", heldOn: ["CP"] }),
+    update({ id: 2, playerName: "Early Out", heldOn: ["CP", "Watchlist"] }),
+    update({ id: 3, playerName: "Two Way", reason: "G League - Two-Way" }),
+    update({ id: 4, playerName: "Who", playerId: null }),
+    update({ id: 5, playerName: "Noon Game", matchup: "NYK@BOS", gameTime: "12:00 (ET)", teamName: "New York Knicks", teamAbbr: "NY" }),
+    update({ id: 6, playerName: "Tomorrow", gameDate: "2026-11-03", gameTime: "01:00 (ET)" }),
   ]);
   const names = (list: FeedUpdate[]) => list.map((u) => u.playerName);
 
-  it("pins my players first, worst status first, even if ongoing", () => {
-    expect(names(feed.mine)).toEqual(["Mine Out", "Mine Questionable"]);
+  it("orders games by tip-off: noon, then 7:30 PM, then 10 PM, then the next day", () => {
+    expect(feed.games.map((g) => g.matchup + " " + g.gameDate)).toEqual([
+      "NYK@BOS 2026-11-02",
+      "DAL@CLE 2026-11-02",
+      "LAL@GSW 2026-11-02",
+      "DAL@CLE 2026-11-03",
+    ]);
+    expect(feed.games[0].start).toBe("2026-11-02T17:00:00.000Z"); // noon EST
+    expect(feed.games[2].start).toBe("2026-11-03T03:00:00.000Z"); // 10 PM EST
   });
 
-  it("lists new and changed league updates newest first", () => {
-    expect(names(feed.newAndChanged)).toEqual(["Fresh", "Long Term Changed", "Older"]);
+  it("lists the away team first and, within a team, worst status first with G League last", () => {
+    expect(feed.games[2].teams.map((t) => t.name)).toEqual(["Los Angeles Lakers", "Golden State Warriors"]);
+    expect(names(feed.games[1].teams[0].updates)).toEqual(["Early Out", "Who", "Early Questionable", "Two Way"]);
   });
 
-  it("collapses unchanged repeat absences and separates G League and unmatched rows", () => {
-    expect(feed.ongoingByTeam).toHaveLength(1);
-    expect(names(feed.ongoingByTeam[0].updates)).toEqual(["Long Term"]);
-    expect(names(feed.gLeague)).toEqual(["Two Way"]);
+  it("counts statuses (ignoring G League) and my players per game", () => {
+    expect(feed.games[1].counts).toEqual({ out: 2, questionable: 1 });
+    expect(feed.games[1].mine).toBe(2);
+  });
+
+  it("still pins my players, worst status first, and lists unmatched names for review", () => {
+    expect(names(feed.mine)).toEqual(["Early Out", "Early Questionable"]);
     expect(names(feed.unmatched)).toEqual(["Who"]);
+  });
+});
+
+describe("time zones", () => {
+  it("reads the report's 12-hour tip-off times as afternoon or evening Eastern", () => {
+    expect(gameStartUtc("2026-03-15", "01:00 (ET)")?.toISOString()).toBe("2026-03-15T17:00:00.000Z");
+    expect(gameStartUtc("2026-12-25", "12:00 (ET)")?.toISOString()).toBe("2026-12-25T17:00:00.000Z");
+    expect(gameStartUtc("2026-11-02", "10:30 (ET)")?.toISOString()).toBe("2026-11-03T03:30:00.000Z");
+    expect(gameStartUtc("2026-11-02", "TBD")).toBeNull();
+  });
+
+  it("formats a tip-off in the viewer's zone, including the date rolling over", () => {
+    const tip = "2026-11-03T00:30:00.000Z"; // 7:30 PM EST on Nov 2
+    const now = new Date("2026-11-02T15:00:00Z");
+    expect(when(tip, "America/New_York", now)).toBe("Today 7:30 PM EST");
+    expect(when(tip, "Europe/London", now)).toBe("Tomorrow 12:30 AM GMT");
+    expect(when(tip, "America/Los_Angeles", now)).toBe("Today 4:30 PM PST");
+  });
+
+  it("validates the time zone cookie and falls back to Eastern", () => {
+    const jar = (v?: string, manual?: string) => ({
+      get: (n: string) => (n === "tz" && v ? { value: v } : n === "tz_manual" && manual ? { value: manual } : undefined),
+    });
+    expect(timeZoneFrom(jar("Europe%2FLondon"))).toEqual({ tz: "Europe/London", manual: false, known: true });
+    expect(timeZoneFrom(jar("Not/AZone", "1"))).toEqual({ tz: "America/New_York", manual: true, known: false });
+    expect(timeZoneFrom(jar())).toEqual({ tz: "America/New_York", manual: false, known: false });
   });
 });
 

@@ -1,6 +1,6 @@
 import type { FeedUpdate, NextUpCall } from "@/lib/feed";
-import { easternClock, gameDayLabel } from "@/lib/format";
-import { easternDate } from "@/lib/time";
+import { when } from "@/lib/format";
+import { gameStartUtc } from "@/lib/time";
 
 const STATUS_STYLE: Record<FeedUpdate["status"], string> = {
   out: "bg-danger text-white",
@@ -63,16 +63,21 @@ export function StatusBadge({ status }: { status: FeedUpdate["status"] }) {
   return <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${STATUS_STYLE[status]}`}>{label(status)}</span>;
 }
 
-export function UpdateItem({ u, today }: { u: FeedUpdate; today: string }) {
+/** One player's update. `showGame` adds the matchup and tip-off, for lists outside a game's dropdown. */
+export function UpdateItem({ u, tz, showGame = false }: { u: FeedUpdate; tz: string; showGame?: boolean }) {
   const trail = u.history.map((h) => label(h.status));
+  const tip = gameStartUtc(u.gameDate, u.gameTime);
   return (
     <li className="py-3">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <StatusBadge status={u.status} />
         <span className="font-medium">{u.playerName}</span>
-        <span className="text-sm text-muted">
-          {u.teamAbbr ?? u.teamName} · {u.matchup} · {gameDayLabel(u.gameDate, today)} {u.gameTime}
-        </span>
+        {showGame && (
+          <span className="text-sm text-muted">
+            {u.teamAbbr ?? u.teamName} · {u.matchup.replace("@", " @ ")} · {tip ? when(tip, tz) : u.gameTime}
+          </span>
+        )}
+        {!u.playerId && <span className="text-xs text-danger">Couldn&apos;t match this name</span>}
         {u.returning && <span className="text-xs font-medium text-accent">Returning</span>}
         {u.heldOn.length > 0 && <OwnerTags heldOn={u.heldOn} />}
       </div>
@@ -80,10 +85,10 @@ export function UpdateItem({ u, today }: { u: FeedUpdate; today: string }) {
       <NextUp u={u} />
       <details className="mt-1 text-xs text-muted">
         <summary className="cursor-pointer select-none">
-          {trail.length > 1 ? `${trail.join(" → ")} · ` : ""}changed {gameDayLabel(easternDate(new Date(u.changedAt)), today).toLowerCase()} {easternClock(u.changedAt)} · report text
+          {trail.length > 1 ? `${trail.join(" → ")} · ` : ""}changed {when(u.changedAt, tz).replace(/^(Today|Tomorrow|Yesterday)/, (d) => d.toLowerCase())} · report text
         </summary>
         <pre className="mt-1 whitespace-pre-wrap rounded bg-background p-2 font-mono">{u.rawText}</pre>
-        <p className="mt-1">From the report published {easternClock(u.reportTime)}.</p>
+        <p className="mt-1">From the report published {when(u.reportTime, tz)}.</p>
       </details>
     </li>
   );

@@ -56,3 +56,15 @@ export function parseReportTime(printed: string): Date | null {
   const hour = (Number(hh) % 12) + (ampm.toUpperCase() === "PM" ? 12 : 0);
   return easternToUtc(`${year}-${mm}-${dd}`, hour, Number(min));
 }
+
+/**
+ * Tip-off instant from the report's game date and time, e.g. "07:30 (ET)".
+ * The report prints 12-hour times without AM/PM; NBA games start from noon to
+ * about 10:30 PM Eastern, so 12 is noon and everything else is PM.
+ */
+export function gameStartUtc(gameDate: string, gameTime: string): Date | null {
+  const m = gameTime.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  return easternToUtc(gameDate, h === 12 ? 12 : h + 12, Number(m[2]));
+}

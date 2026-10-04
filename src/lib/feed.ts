@@ -4,6 +4,7 @@ import type { Beneficiary } from "./nextUp/rules";
 import { groupsFromUpdates, type GroupUpdate } from "./nextUp/store";
 import type { InjuryStatus } from "./sources/nbaInjuryReport";
 import { REFRESH_WINDOW_MS } from "./injuryIngest";
+import { gameStartUtc } from "./time";
 
 export const STATUS_ORDER: InjuryStatus[] = ["out", "doubtful", "questionable", "probable", "available"];
 
@@ -35,16 +36,29 @@ export type NextUpCall = Beneficiary & { heldOn: string[] };
 /** A player I hold who gains from someone else's absence. */
 export type Opportunity = { call: NextUpCall; because: FeedUpdate[] };
 
+/** One game's updates, both teams. */
+export type Game = {
+  key: string;
+  gameDate: string;
+  matchup: string; // "DAL@CLE"
+  /** Tip-off as an ISO instant; null if the report's time couldn't be read. */
+  start: string | null;
+  teams: { name: string; abbr: string | null; updates: FeedUpdate[] }[];
+  counts: Partial<Record<InjuryStatus, number>>;
+  /** Updates about my players, and my players named as gaining. */
+  mine: number;
+  gains: number;
+};
+
 export type Feed = {
-  mine: FeedUpdate[];
-  newAndChanged: FeedUpdate[];
-  /** Unchanged repeat absences, collapsed per NBA team. */
-  ongoingByTeam: { team: string; updates: FeedUpdate[] }[];
-  gLeague: FeedUpdate[];
-  /** Names the report printed that matched no directory player. */
-  unmatched: FeedUpdate[];
   /** My players named as gaining, soonest game first. */
   opportunities: Opportunity[];
+  /** Updates about players I hold, worst status first. */
+  mine: FeedUpdate[];
+  /** Every update, grouped by game, earliest tip-off first. */
+  games: Game[];
+  /** Names the report printed that matched no directory player. */
+  unmatched: FeedUpdate[];
 };
 
 export type IngestState = {
@@ -55,46 +69,72 @@ export type IngestState = {
 };
 
 const severity = (s: InjuryStatus) => STATUS_ORDER.indexOf(s);
-const byChangeThenSeverity = (a: FeedUpdate, b: FeedUpdate) =>
-  b.changedAt.localeCompare(a.changedAt) || severity(a.status) - severity(b.status) || a.playerName.localeCompare(b.playerName);
 
 export const isGLeague = (u: Pick<FeedUpdate, "reason">) => /^G League/i.test(u.reason);
 
-/** Splits upcoming-game updates into the feed's sections. Every update lands in exactly one. */
+/** Within a team: worst status first, G League and two-way assignments last. */
+const inTeamOrder = (a: FeedUpdate, b: FeedUpdate) =>
+  Number(isGLeague(a)) - Number(isGLeague(b)) || severity(a.status) - severity(b.status) || a.playerName.localeCompare(b.playerName);
+
+/** Groups upcoming-game updates by game and pulls out what concerns my players. */
 export function buildFeed(updates: FeedUpdate[]): Feed {
-  const feed: Feed = { mine: [], newAndChanged: [], ongoingByTeam: [], gLeague: [], unmatched: [], opportunities: [] };
   const opportunities = new Map<string, Opportunity>();
-  const ongoing = new Map<string, FeedUpdate[]>();
+  const games = new Map<string, Game & { order: Map<string, number> }>();
+  const mine: FeedUpdate[] = [];
+  const unmatched: FeedUpdate[] = [];
 
   for (const u of updates) {
+    const key = `${u.gameDate}|${u.matchup}`;
+    let game = games.get(key);
+    if (!game) {
+      const start = gameStartUtc(u.gameDate, u.gameTime);
+      game = { key, gameDate: u.gameDate, matchup: u.matchup, start: start?.toISOString() ?? null, teams: [], counts: {}, mine: 0, gains: 0, order: new Map() };
+      games.set(key, game);
+    }
+    let team = game.teams.find((t) => t.name === u.teamName);
+    if (!team) {
+      team = { name: u.teamName, abbr: u.teamAbbr, updates: [] };
+      game.teams.push(team);
+    }
+    team.updates.push(u);
+    // The report lists the away team first; ids follow report order.
+    game.order.set(u.teamName, Math.min(game.order.get(u.teamName) ?? Infinity, u.id));
+    if (!isGLeague(u)) game.counts[u.status] = (game.counts[u.status] ?? 0) + 1;
+
     for (const call of u.nextUp ?? []) {
       if (!call.heldOn.length || call.type === "loses_minutes") continue;
-      const key = `${u.gameDate}|${call.player_id}`;
-      const o = opportunities.get(key) ?? { call, because: [] };
+      const k = `${u.gameDate}|${call.player_id}`;
+      const o = opportunities.get(k) ?? { call, because: [] };
+      if (!o.because.length) game.gains++;
       o.because.push(u);
-      opportunities.set(key, o);
+      opportunities.set(k, o);
     }
-    if (u.heldOn.length) feed.mine.push(u);
-    else if (!u.playerId) feed.unmatched.push(u);
-    else if (isGLeague(u)) feed.gLeague.push(u);
-    else if (u.ongoing && u.history.length === 1) {
-      const list = ongoing.get(u.teamName) ?? [];
-      list.push(u);
-      ongoing.set(u.teamName, list);
-    } else feed.newAndChanged.push(u);
+    if (u.heldOn.length) {
+      mine.push(u);
+      game.mine++;
+    }
+    if (!u.playerId) unmatched.push(u);
   }
 
-  feed.opportunities = [...opportunities.values()].sort(
-    (a, b) => a.because[0].gameDate.localeCompare(b.because[0].gameDate) || a.call.name.localeCompare(b.call.name),
-  );
-  feed.mine.sort((a, b) => severity(a.status) - severity(b.status) || byChangeThenSeverity(a, b));
-  feed.newAndChanged.sort(byChangeThenSeverity);
-  feed.gLeague.sort((a, b) => a.teamName.localeCompare(b.teamName) || a.playerName.localeCompare(b.playerName));
-  feed.unmatched.sort((a, b) => a.playerName.localeCompare(b.playerName));
-  feed.ongoingByTeam = [...ongoing]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([team, list]) => ({ team, updates: list.sort((a, b) => a.playerName.localeCompare(b.playerName)) }));
-  return feed;
+  const startOf = (g: Game) => g.start ?? `${g.gameDate}T23:59:59Z`;
+  const sortedGames = [...games.values()]
+    .sort((a, b) => startOf(a).localeCompare(startOf(b)) || a.matchup.localeCompare(b.matchup))
+    .map(({ order, ...g }) => {
+      g.teams.sort((a, b) => (order.get(a.name) ?? 0) - (order.get(b.name) ?? 0));
+      for (const t of g.teams) t.updates.sort(inTeamOrder);
+      return g;
+    });
+  const gameStart = new Map(sortedGames.map((g, i) => [g.key, i]));
+  const gameIndex = (u: FeedUpdate) => gameStart.get(`${u.gameDate}|${u.matchup}`) ?? 0;
+
+  return {
+    opportunities: [...opportunities.values()].sort(
+      (a, b) => gameIndex(a.because[0]) - gameIndex(b.because[0]) || a.call.name.localeCompare(b.call.name),
+    ),
+    mine: mine.sort((a, b) => severity(a.status) - severity(b.status) || gameIndex(a) - gameIndex(b) || a.playerName.localeCompare(b.playerName)),
+    games: sortedGames,
+    unmatched: unmatched.sort((a, b) => a.playerName.localeCompare(b.playerName)),
+  };
 }
 
 export function isStale(state: IngestState, now = new Date()): boolean {
