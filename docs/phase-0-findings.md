@@ -12,7 +12,7 @@ Oct 4, 2026. Run `npm run spike` to repeat the local checks. `/api/spike` runs t
 | Official injury report, latest | Skip | Pending | Preseason; nothing published in the last 4 hours |
 | Name matching, report to directory | Pass | Pending | 126 of 142 (89%). All 16 misses are roster churn since March, not format errors |
 | ESPN injury feed | Pass | Pending | 60 entries, all with ESPN IDs |
-| Language model, next-up | Skip | Pending | Needs an API key (see below) |
+| Language model, next-up | Pass | Pending | `gemini-3.5-flash-lite`, about 1 s. On the Cooper Flagg example it named Marshall as the starting replacement and Washington for more usage, with no invented names |
 
 ## Decisions
 
@@ -39,7 +39,7 @@ Oct 4, 2026. Run `npm run spike` to repeat the local checks. `/api/spike` runs t
 - *`cdn.nba.com` live data:* returned 403 to every request.
 - *balldontlie:* the free tier has no box scores or stats, and those cost $9.99 a month.
 
-**Language model: either provider, behind the same OpenAI-compatible adapter.** Both have free tiers with no card on file. Limits change often, so check them in the console:
+**Language model: Gemini `gemini-3.5-flash-lite` through the OpenAI-compatible endpoint.** Chosen because it's a stable release, not a preview, and Flash-Lite has the most generous free daily limit. Groq remains a drop-in swap through env settings. Both have free tiers with no card on file. Limits change often, so check them in the console:
 - Gemini Flash-Lite: about 500 requests a day.
 - Groq: about 1,000 a day.
 
@@ -48,5 +48,4 @@ A busy game day needs a few dozen calls, one per change in the set of absent pla
 ## Left to do
 
 1. Deploy to Vercel and run `/api/spike`. Phase 0 is done when every check passes there, which proves Vercel's addresses aren't blocked.
-2. Create a free model API key and rerun the `llm.nextUp` check.
-3. Rerun `nba.injuryReport.latest` on the first game day of the regular season.
+2. Rerun `nba.injuryReport.latest` on the first game day of the regular season.
