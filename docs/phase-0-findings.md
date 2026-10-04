@@ -1,0 +1,52 @@
+# Phase 0 findings: data sources
+
+Oct 4, 2026. Run `npm run spike` to repeat the local checks. `/api/spike` runs the same checks from a Vercel function.
+
+## Results
+
+| Check | Local | Vercel | Notes |
+| --- | --- | --- | --- |
+| Player directory (ESPN) | Pass | Pending | 30 teams, 605 players; all have a position |
+| Game logs (ESPN box scores) | Pass | Pending | 15 Mar 2026: 7 games, 182 lines; every team has exactly 5 starters |
+| Official injury report, reference PDF | Pass | Pending | 142 entries and 9 not-submitted teams, both matching a hand count |
+| Official injury report, latest | Skip | Pending | Preseason; nothing published in the last 4 hours |
+| Name matching, report to directory | Pass | Pending | 126 of 142 (89%). All 16 misses are roster churn since March, not format errors |
+| ESPN injury feed | Pass | Pending | 60 entries, all with ESPN IDs |
+| Language model, next-up | Skip | Pending | Needs an API key (see below) |
+
+## Decisions
+
+**Injury news: the NBA's official injury report.**
+- *URL:* `https://ak-static.cms.nba.com/referee/injury/Injury-Report_YYYY-MM-DD_HH_MM{AM|PM}.pdf`.
+- *Publishing:* a new report every 15 minutes on game days, timestamped in US Eastern time. That cadence meets the PRD's 10-minute freshness target to within one slot.
+- *Access:* it needs a browser-like `User-Agent`, and plain curl gets a 403.
+- *Format change:* the 2024-25 season used the hourly `_05PM` format.
+- *Parsing:* it's a positioned table, so the parser works by layout and needs no language model. It handles:
+  - wrapped reasons
+  - suffixes placed before the comma
+  - date, matchup and team cells left blank on repeat rows
+  - teams marked "NOT YET SUBMITTED"
+
+**Player directory, game logs and depth chart: ESPN's public site API.**
+- *Directory:* the roster endpoint gives stable IDs, names and position, and it includes two-way players.
+- *Game logs:* the box-score endpoint has a `starter` flag and full counting stats, so it can feed both the depth chart and Feature 4.
+- *Request cost:* a full game night is one scoreboard call plus one call per game.
+- *Positions:* ESPN collapses positions to one letter (G, F, C), so the "next man at position" rule works at that level.
+- *Terms risk:* the API is undocumented. Its terms risk is lower than scraping HTML, but it is not zero.
+
+**Ruled out:**
+- *`stats.nba.com` (`nba_api`):* timed out even from a home connection.
+- *`cdn.nba.com` live data:* returned 403 to every request.
+- *balldontlie:* the free tier has no box scores or stats, and those cost $9.99 a month.
+
+**Language model: either provider, behind the same OpenAI-compatible adapter.** Both have free tiers with no card on file. Limits change often, so check them in the console:
+- Gemini Flash-Lite: about 500 requests a day.
+- Groq: about 1,000 a day.
+
+A busy game day needs a few dozen calls, one per change in the set of absent players on a team.
+
+## Left to do
+
+1. Deploy to Vercel and run `/api/spike`. Phase 0 is done when every check passes there, which proves Vercel's addresses aren't blocked.
+2. Create a free model API key and rerun the `llm.nextUp` check.
+3. Rerun `nba.injuryReport.latest` on the first game day of the regular season.
