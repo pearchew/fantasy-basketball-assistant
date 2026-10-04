@@ -1,5 +1,7 @@
 import type { FeedUpdate, NextUpCall } from "@/lib/feed";
 import { when } from "@/lib/format";
+import type { StatsLookup } from "@/lib/stats";
+import { StatsPanel } from "./StatsPanel";
 import { gameStartUtc } from "@/lib/time";
 
 const STATUS_STYLE: Record<FeedUpdate["status"], string> = {
@@ -32,7 +34,7 @@ export function OwnerTags({ heldOn }: { heldOn: string[] }) {
   );
 }
 
-function NextUp({ u }: { u: FeedUpdate }) {
+function NextUp({ u, stats }: { u: FeedUpdate; stats: StatsLookup | null }) {
   if (!u.nextUp) return null;
   const title = u.returning ? "With him back, losing minutes:" : "Next up:";
   return (
@@ -51,6 +53,7 @@ function NextUp({ u }: { u: FeedUpdate }) {
                 {b.questionable && <StatusBadge status="questionable" />}
               </span>
               <span className="text-muted">{b.reason}</span>
+              <StatsPanel playerId={b.player_id} stats={stats} />
             </li>
           ))}
         </ul>
@@ -64,7 +67,17 @@ export function StatusBadge({ status }: { status: FeedUpdate["status"] }) {
 }
 
 /** One player's update. `showGame` adds the matchup and tip-off, for lists outside a game's dropdown. */
-export function UpdateItem({ u, tz, showGame = false }: { u: FeedUpdate; tz: string; showGame?: boolean }) {
+export function UpdateItem({
+  u,
+  tz,
+  stats = null,
+  showGame = false,
+}: {
+  u: FeedUpdate;
+  tz: string;
+  stats?: StatsLookup | null;
+  showGame?: boolean;
+}) {
   const trail = u.history.map((h) => label(h.status));
   const tip = gameStartUtc(u.gameDate, u.gameTime);
   return (
@@ -82,7 +95,9 @@ export function UpdateItem({ u, tz, showGame = false }: { u: FeedUpdate; tz: str
         {u.heldOn.length > 0 && <OwnerTags heldOn={u.heldOn} />}
       </div>
       {u.reason && <p className="mt-1 text-sm">{u.reason}</p>}
-      <NextUp u={u} />
+      {/* My own players get their form here; next-up names get it in the list below. */}
+      {u.heldOn.length > 0 && u.playerId && <StatsPanel playerId={u.playerId} stats={stats} />}
+      <NextUp u={u} stats={stats} />
       <details className="mt-1 text-xs text-muted">
         <summary className="cursor-pointer select-none">
           {trail.length > 1 ? `${trail.join(" → ")} · ` : ""}changed {when(u.changedAt, tz).replace(/^(Today|Tomorrow|Yesterday)/, (d) => d.toLowerCase())} · report text

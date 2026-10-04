@@ -9,6 +9,7 @@
   --accent: #c2410c;
   --accent-soft: #fdeee6;
   --danger: #b91c1c;
+  --good: #15803d;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -21,6 +22,7 @@
     --accent: #fb923c;
     --accent-soft: #3a2316;
     --danger: #f87171;
+    --good: #4ade80;
   }
 }
 
@@ -33,6 +35,7 @@
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
   --color-danger: var(--danger);
+  --color-good: var(--good);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

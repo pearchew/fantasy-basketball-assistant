@@ -17,6 +17,7 @@ export async function ingestGameLogs(admin: SupabaseClient, isoDate: string) {
       game_date: isoDate,
       season: g.season,
       season_type: g.seasonType,
+      comp_type: g.compType,
       home_abbr: g.home,
       away_abbr: g.away,
       status: g.status,
@@ -34,6 +35,8 @@ export async function ingestGameLogs(admin: SupabaseClient, isoDate: string) {
       game_date: isoDate,
       season: games[i].season,
       season_type: games[i].seasonType,
+      // All-Star games and the NBA Cup final are labelled regular season but don't count in official stats.
+      counts_for_stats: games[i].compType === "STD",
       starter: l.starter,
       did_not_play: l.didNotPlay,
       min: l.min, pts: l.pts,

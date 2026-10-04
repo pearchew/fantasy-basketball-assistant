@@ -6,6 +6,8 @@ import { TimeZoneControl } from "@/components/TimeZoneControl";
 import { OwnerTags, StatusBadge, TYPE_LABEL, UpdateItem } from "@/components/UpdateItem";
 import { isStale, loadFeed, STATUS_ORDER, type Game } from "@/lib/feed";
 import { ago, clock, dayLabel, gameDateLabel, localDate, when } from "@/lib/format";
+import { loadStats, type StatsLookup } from "@/lib/stats";
+import { StatsPanel } from "@/components/StatsPanel";
 import { createClient } from "@/lib/supabase/server";
 import { timeZoneFrom } from "@/lib/timezone";
 import { easternDate } from "@/lib/time";
@@ -23,7 +25,7 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 const STATUS_WORD: Record<string, string> = { out: "out", doubtful: "doubtful", questionable: "questionable", probable: "probable", available: "available" };
 
 /** One game, closed by default; the summary line says what's inside. */
-function GameDropdown({ game, tz }: { game: Game; tz: string }) {
+function GameDropdown({ game, tz, stats }: { game: Game; tz: string; stats: StatsLookup }) {
   const [away, home] = game.matchup.split("@");
   // "Available" players are playing: worth seeing inside the game, noise in the summary.
   const counts = STATUS_ORDER.filter((s) => s !== "available" && game.counts[s]).map((s) => `${game.counts[s]} ${STATUS_WORD[s]}`);
@@ -55,7 +57,7 @@ function GameDropdown({ game, tz }: { game: Game; tz: string }) {
             <h3 className="pt-3 text-sm font-semibold">{t.name}</h3>
             <ul className="divide-y divide-border">
               {t.updates.map((u) => (
-                <UpdateItem key={u.id} u={u} tz={tz} />
+                <UpdateItem key={u.id} u={u} tz={tz} stats={stats} />
               ))}
             </ul>
           </div>
@@ -77,6 +79,13 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
     loadFeed(supabase, archiveDate ?? today, { onlyDate: !!archiveDate }),
     supabase.auth.getClaims(),
   ]);
+
+  // Form for my players and everyone named as next up: one database call.
+  const statIds = [
+    ...feed.mine.map((u) => u.playerId),
+    ...feed.games.flatMap((g) => g.teams.flatMap((t) => t.updates.flatMap((u) => (u.nextUp ?? []).map((b) => b.player_id)))),
+  ].filter((id): id is string => !!id);
+  const stats = await loadStats(supabase, statIds);
 
   // Day headings follow the tip-off date in my time zone.
   const days: { label: string; games: Game[] }[] = [];
@@ -128,6 +137,7 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
                     {because.map((u) => `${u.playerName} ${u.status}`).join(", ")} · {because[0].matchup.replace("@", " @ ")}
                   </span>
                   <span className="block">{call.reason}</span>
+                  <StatsPanel playerId={call.player_id} stats={stats} />
                 </li>
               ))}
             </ul>
@@ -138,7 +148,7 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
           <Section title="Your players" hint="On your teams or watchlist.">
             <ul className="divide-y divide-border">
               {feed.mine.map((u) => (
-                <UpdateItem key={u.id} u={u} tz={tz} showGame />
+                <UpdateItem key={u.id} u={u} tz={tz} stats={stats} showGame />
               ))}
             </ul>
           </Section>
@@ -151,7 +161,7 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
               {d.games.length} {d.games.length === 1 ? "game" : "games"}
             </h2>
             {d.games.map((g) => (
-              <GameDropdown key={g.key} game={g} tz={tz} />
+              <GameDropdown key={g.key} game={g} tz={tz} stats={stats} />
             ))}
           </section>
         ))}

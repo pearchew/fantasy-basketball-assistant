@@ -2,7 +2,7 @@
 
 A personal tool that watches NBA injury news and tells me which players stand to gain. See [docs/PRD.md](docs/PRD.md).
 
-**Status:** Phase 3 (next-up inference). Phase 0 findings are in [docs/phase-0-findings.md](docs/phase-0-findings.md).
+**Status:** Phases 0–4 complete (v1). Phase 0 findings are in [docs/phase-0-findings.md](docs/phase-0-findings.md).
 
 ## Stack
 
@@ -42,6 +42,12 @@ Opening the feed shows saved data straight away. If the last check is over 10 mi
 For each team-game with someone out, doubtful or returning, rules build a depth chart from the team's last 10 box scores (current season once it has 3 games) and pick candidates: whoever started when the player sat, bench players at his position, then starters at or next to it. Gemini orders them and writes the reasons; any name outside the candidate list is rejected and the rule answer is used instead. Answers are stored per (team, game, set of absent and returning players), so the model is called again only when that set changes. Free-tier rate limits: at most 8 model calls per refresh; the rest get the rule answer and are upgraded on a later refresh.
 
 `npm run backtest-nextup` (add `-- --model` to include Gemini) replays 20 past starter absences from 2025-26 and checks whether a named player beat his 14-game minutes average. Oct 4, 2026: rules 18/20, rules + model 18/20; target 14/20.
+
+## Recent stats
+
+Rostered players, the watchlist and every next-up name show averages over their last 7, 14 and 30 games played next to the season average, computed in Postgres (`player_stat_windows`) from stored box scores. "Current season" is the latest regular season with games stored. FG% and FT% are total makes over attempts. ESPN labels the All-Star games and the NBA Cup final as regular season; they're stored with `counts_for_stats = false` and left out, matching official stats.
+
+`npm run spot-check-stats` compares five players' season averages with ESPN's official numbers (Oct 4, 2026: all five match for 2025-26; minutes can differ by under 0.1 because box scores give whole minutes).
 
 ## Phase 0 check on Vercel
 

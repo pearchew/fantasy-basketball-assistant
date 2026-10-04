@@ -20,6 +20,8 @@ export type GameSummary = {
   status: string; // e.g. STATUS_FINAL, STATUS_SCHEDULED
   season: number; // ESPN season year: 2027 = 2026-27
   seasonType: number; // 1 preseason, 2 regular season, 3 postseason
+  /** ESPN competition type: STD for normal games, ALLSTAR, CC (NBA Cup championship). */
+  compType: string;
   home: string;
   away: string;
 };
@@ -96,7 +98,7 @@ type ScoreboardResponse = {
     date: string;
     season: { year: number; type: number };
     status: { type: { name: string } };
-    competitions: { competitors: { homeAway: "home" | "away"; team: { abbreviation: string } }[] }[];
+    competitions: { type?: { abbreviation?: string }; competitors: { homeAway: "home" | "away"; team: { abbreviation: string } }[] }[];
   }[];
 };
 
@@ -112,6 +114,7 @@ export async function fetchScoreboard(yyyymmdd: string): Promise<GameSummary[]> 
       status: e.status.type.name,
       season: e.season.year,
       seasonType: e.season.type,
+      compType: e.competitions[0].type?.abbreviation ?? "STD",
       home: side("home"),
       away: side("away"),
     };

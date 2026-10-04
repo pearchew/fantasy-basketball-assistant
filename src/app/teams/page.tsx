@@ -3,6 +3,7 @@ import { PlayerSearch } from "@/components/PlayerSearch";
 import { PlayerTable } from "@/components/PlayerTable";
 import { NewTeamButton, NewTeamForm, TeamSettings } from "@/components/TeamForms";
 import { loadDashboard, type Dashboard } from "@/lib/dashboard";
+import { loadStats } from "@/lib/stats";
 import { createClient } from "@/lib/supabase/server";
 import { AppHeader } from "@/components/AppHeader";
 
@@ -17,6 +18,7 @@ export default async function TeamsPage({ searchParams }: PageProps<"/teams">) {
   const { view: rawView } = await searchParams;
   const supabase = await createClient();
   const [data, { data: auth }] = await Promise.all([loadDashboard(supabase), supabase.auth.getClaims()]);
+  const stats = await loadStats(supabase, [...Object.values(data.rosters).flat(), ...data.watchlist].map((p) => p.espnId));
 
   const requested = typeof rawView === "string" ? rawView : undefined;
   const team = data.teams.find((t) => t.id === requested);
@@ -58,7 +60,7 @@ export default async function TeamsPage({ searchParams }: PageProps<"/teams">) {
           <section className="space-y-4 rounded-xl border border-border bg-surface p-4">
             <TeamSettings key={current.id} team={current} playerCount={data.rosters[current.id].length} />
             <PlayerSearch directory={data.directory} target={current.id} teams={data.teams} heldBy={heldBy} />
-            <PlayerTable players={data.rosters[current.id]} context={current.id} emptyText="No players yet. Search above to add one." />
+            <PlayerTable players={data.rosters[current.id]} context={current.id} emptyText="No players yet. Search above to add one." stats={stats} />
           </section>
         )}
 
@@ -69,7 +71,7 @@ export default async function TeamsPage({ searchParams }: PageProps<"/teams">) {
               <p className="text-sm text-muted">Players you don&apos;t own but want to track.</p>
             </div>
             <PlayerSearch directory={data.directory} target="watchlist" teams={data.teams} heldBy={heldBy} />
-            <PlayerTable players={data.watchlist} context="watchlist" emptyText="Nobody on the watchlist yet." />
+            <PlayerTable players={data.watchlist} context="watchlist" emptyText="Nobody on the watchlist yet." stats={stats} />
           </section>
         )}
 
@@ -87,7 +89,7 @@ export default async function TeamsPage({ searchParams }: PageProps<"/teams">) {
                   <Link href={`/teams?view=${t.id}`} className="font-semibold hover:underline">
                     {t.name}
                   </Link>
-                  <PlayerTable players={data.rosters[t.id]} context={t.id} emptyText="No players yet." />
+                  <PlayerTable players={data.rosters[t.id]} context={t.id} emptyText="No players yet." stats={stats} />
                 </section>
               ))}
             </>
