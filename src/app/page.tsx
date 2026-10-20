@@ -1,11 +1,13 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { AppHeader } from "@/components/AppHeader";
+import { NextUpUpdate } from "@/components/NextUpUpdate";
 import { RefreshControls } from "@/components/RefreshControls";
 import { TimeZoneControl } from "@/components/TimeZoneControl";
 import { OwnerTags, StatusBadge, TYPE_LABEL, UpdateItem } from "@/components/UpdateItem";
 import { isStale, loadFeed, STATUS_ORDER, type Game } from "@/lib/feed";
 import { ago, clock, dayLabel, gameDateLabel, localDate, when } from "@/lib/format";
+import { redoStatus } from "@/lib/nextUp/redo";
 import { loadStats, type StatsLookup } from "@/lib/stats";
 import { StatsPanel } from "@/components/StatsPanel";
 import { createClient } from "@/lib/supabase/server";
@@ -85,7 +87,7 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
     ...feed.mine.map((u) => u.playerId),
     ...feed.games.flatMap((g) => g.teams.flatMap((t) => t.updates.flatMap((u) => (u.nextUp ?? []).map((b) => b.player_id)))),
   ].filter((id): id is string => !!id);
-  const stats = await loadStats(supabase, statIds);
+  const [stats, redo] = await Promise.all([loadStats(supabase, statIds), archiveDate ? null : redoStatus(supabase)]);
 
   // Day headings follow the tip-off date in my time zone.
   const days: { label: string; games: Game[] }[] = [];
@@ -105,6 +107,11 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
         {state.lastSuccessAt && <span>· checked {ago(state.lastSuccessAt)}</span>}
         {!archiveDate && <RefreshControls stale={isStale(state)} />}
       </p>
+      {!archiveDate && redo && feed.games.length > 0 && (
+        <p className="mt-1 text-sm text-muted">
+          <NextUpUpdate status={redo} />
+        </p>
+      )}
       {archiveDate && (
         <p className="mt-2 rounded-lg bg-accent-soft p-3 text-sm">
           Archive: games on {gameDateLabel(archiveDate)} (US Eastern).{" "}

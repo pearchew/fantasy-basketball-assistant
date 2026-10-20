@@ -123,8 +123,13 @@ async function computeGroup(admin: SupabaseClient, g: Group, useModel: boolean) 
     questionable,
   });
 
+  // Latest box score the depth chart saw; a later team game makes this answer out of date.
+  const computedThrough = logs.reduce<string | null>((max, l) => (!max || l.game_date > max ? l.game_date : max), null);
+
   const config = llmConfigFromEnv();
-  if (!useModel || !config) return { beneficiaries: rules.beneficiaries, source: "rules" as const, model: null, modelError: null, tried: false };
+  if (!useModel || !config) {
+    return { beneficiaries: rules.beneficiaries, source: "rules" as const, model: null, modelError: null, tried: false, computedThrough };
+  }
   try {
     const calls = await askModel(
       config,
@@ -137,19 +142,17 @@ async function computeGroup(admin: SupabaseClient, g: Group, useModel: boolean) 
       model: config.model,
       modelError: v.rejected.length ? `rejected: ${v.rejected.join("; ")}` : null,
       tried: true,
+      computedThrough,
     };
   } catch (e) {
-    return { beneficiaries: rules.beneficiaries, source: "rules" as const, model: null, modelError: e instanceof Error ? e.message : String(e), tried: true };
+    const modelError = e instanceof Error ? e.message : String(e);
+    return { beneficiaries: rules.beneficiaries, source: "rules" as const, model: null, modelError, tried: true, computedThrough };
   }
 }
 
-/**
- * Computes answers for new groups (and retries model failures), within a model-call budget.
- * Gemini's free tier allows roughly 8-10 calls a minute: groups past the budget get the rule
- * answer now and the model's on a later refresh.
- */
-export async function updateNextUp(admin: SupabaseClient, fromDate: string, { modelBudget = 8 } = {}) {
-  const { data: updates, error } = await admin
+/** Current team-game groups for games from `fromDate` on. Works with any client that can read the tables. */
+export async function loadGroups(db: SupabaseClient, fromDate: string): Promise<Group[]> {
+  const { data: updates, error } = await db
     .from("injury_updates")
     .select("game_date, matchup, team_abbr, player_id, player_name, status, reason, is_returning")
     .gte("game_date", fromDate);
@@ -157,31 +160,61 @@ export async function updateNextUp(admin: SupabaseClient, fromDate: string, { mo
   const ids = [...new Set((updates as GroupUpdate[]).map((u) => u.player_id).filter((id): id is string => !!id))];
   const positions = new Map<string, string>();
   for (let i = 0; i < ids.length; i += 200) {
-    const { data } = await admin.from("players").select("espn_id, position").in("espn_id", ids.slice(i, i + 200));
+    const { data } = await db.from("players").select("espn_id, position").in("espn_id", ids.slice(i, i + 200));
     for (const p of data ?? []) positions.set(p.espn_id, p.position);
   }
+  return groupsFromUpdates(updates as GroupUpdate[], positions);
+}
 
-  const groups = groupsFromUpdates(updates as GroupUpdate[], positions);
-  const existing = new Map<string, { source: string; model_attempts: number }>();
+export type StoredAnswer = {
+  group_key: string;
+  source: string;
+  model_attempts: number;
+  computed_through: string | null;
+  needs_recompute: boolean;
+};
+
+/** Stored answers for these groups, keyed by group key. */
+export async function loadAnswers(db: SupabaseClient, groups: Group[]): Promise<Map<string, StoredAnswer>> {
+  const out = new Map<string, StoredAnswer>();
   for (let i = 0; i < groups.length; i += 50) {
-    const { data, error: e } = await admin
+    const { data, error } = await db
       .from("next_up")
-      .select("group_key, source, model_attempts")
+      .select("group_key, source, model_attempts, computed_through, needs_recompute")
       .in("group_key", groups.slice(i, i + 50).map((g) => g.key));
-    if (e) throw e;
-    for (const r of data ?? []) existing.set(r.group_key, r);
+    if (error) throw error;
+    for (const r of data ?? []) out.set(r.group_key, r as StoredAnswer);
   }
+  return out;
+}
+
+/**
+ * Computes answers for new groups, recomputes those flagged by a manual update, and
+ * retries model failures, within a model-call budget. Gemini's free tier allows roughly
+ * 8-10 calls a minute: groups past the budget wait for a later run (or get the rule answer
+ * now, if they have no answer yet).
+ */
+export async function updateNextUp(admin: SupabaseClient, fromDate: string, { modelBudget = 8 } = {}) {
+  const groups = await loadGroups(admin, fromDate);
+  const existing = await loadAnswers(admin, groups);
 
   const hasModel = !!llmConfigFromEnv();
-  const todo = groups.filter((g) => {
+  // New groups first (nothing to show yet), then manual updates, then model retries.
+  const rank = (g: Group) => {
     const row = existing.get(g.key);
-    return !row || (hasModel && row.source === "rules" && row.model_attempts < MAX_MODEL_ATTEMPTS);
-  });
+    if (!row) return 0;
+    if (row.needs_recompute) return 1;
+    if (hasModel && row.source === "rules" && row.model_attempts < MAX_MODEL_ATTEMPTS) return 2;
+    return -1;
+  };
+  const todo = groups.filter((g) => rank(g) >= 0).sort((a, b) => rank(a) - rank(b));
 
   let budget = modelBudget;
   const summary = { groups: groups.length, computed: 0, model: 0, rules: 0, errors: [] as string[] };
   await mapLimit(todo, 3, async (g) => {
     const useModel = budget-- > 0;
+    // A flagged answer keeps showing until the model can redo it; don't overwrite it with rules.
+    if (!useModel && existing.get(g.key)?.needs_recompute) return;
     try {
       const r = await computeGroup(admin, g, useModel);
       // Rate limited: stop calling the model for the rest of this run.
@@ -199,6 +232,8 @@ export async function updateNextUp(admin: SupabaseClient, fromDate: string, { mo
           model: r.model,
           model_error: r.modelError,
           model_attempts: attempts,
+          computed_through: r.computedThrough,
+          needs_recompute: false,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "group_key" },

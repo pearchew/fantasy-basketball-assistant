@@ -143,6 +143,19 @@ sequenceDiagram
 4. Upserts into `next_up`.
 5. **Budget:** at most 8 model calls per run, and the model stops at the first 429 (free tier is about 8–10 calls a minute). Later runs upgrade the rule answers.
 
+### 3b. Updating next-up calls by hand: `redo` (`src/lib/nextUp/redo.ts`)
+
+Calls are made once per (team, game, absent set), so a call made before last night's box score loaded doesn't see that game. The feed's **Update next-up calls** button redoes those calls within a daily Gemini allowance (`NEXT_UP_REDO_DAILY_CALLS`, default 60):
+
+1. **`planRedo`** works out what an update would involve:
+   - **Out of date:** a call whose team has a finished game after the box scores it used (`next_up.computed_through`) and before the game it's for.
+   - **Cost:** one Gemini call per out-of-date call.
+   - **Runs left:** remaining allowance ÷ cost.
+
+   The button shows all three, and is greyed out when nothing is out of date or the allowance can't cover another run.
+2. **Start:** `reserve_model_calls` reserves the run's calls atomically (refused if they don't fit today). The out-of-date calls are then flagged `needs_recompute` and the first batch of 8 runs.
+3. **Continue:** while the page is open, the button runs the next batch every minute, staying under the free tier's per-minute limit. Flagged calls keep showing their old answer until the model redoes them.
+
 ### 4. Daily job: `GET /api/cron/daily` (Vercel Cron, 10:00 UTC)
 
 Each step runs even if an earlier one fails, and the response reports each step's result.
@@ -237,7 +250,9 @@ The job also keeps the free Supabase project from pausing.
 | `buildPrompt`, `askModel` | `model.ts` | Model prompt with rule notes; call with one JSON retry |
 | `validateModelCalls`, `oneSentence` | `model.ts` | Keeps only valid candidates, falls back to rules, trims reasons |
 | `groupsFromUpdates` | `store.ts` | Team-game groups and their keys from injury updates |
-| `updateNextUp` | `store.ts` | Computes missing answers within the model budget and stores them |
+| `loadGroups`, `loadAnswers` | `store.ts` | Current team-game groups; their stored answers |
+| `updateNextUp` | `store.ts` | Computes new answers, flagged updates and model retries within the model budget |
+| `planRedo`, `redoStatus`, `redo` | `redo.ts` | Out-of-date calls, run cost and runs left; start or continue a manual update |
 
 ### Server actions and auth helpers
 
@@ -257,6 +272,7 @@ The job also keeps the free Supabase project from pausing.
 | --- | --- |
 | `AppHeader` | Injuries / Teams navigation and sign-out |
 | `RefreshControls` | Automatic refresh when stale, plus the Refresh button |
+| `NextUpUpdate` | "Update next-up calls" with cost, runs left, greyed-out states and batch progress |
 | `UpdateItem`, `StatusBadge`, `OwnerTags` | One injury update with history, report text, next-up calls and ownership |
 | `StatsPanel` | Recent form: summary line and window table |
 | `PlayerSearch` | Autocomplete add-player box |
@@ -272,6 +288,7 @@ The job also keeps the free Supabase project from pausing.
 | `GET /teams` | Session | Teams, rosters and watchlist (`?view=all`, `?view=watchlist` or `?view=<team id>`) |
 | `GET /login` | None | Sign-in form |
 | `GET /auth/callback` | One-time link | Completes sign-in |
+| `POST /api/next-up/redo` | Session | "Update next-up calls": `{"action": "start"}` reserves the run's Gemini calls and runs the first batch; `{"action": "continue"}` runs the next batch a minute later |
 | `POST /api/refresh` | Session | Ingests the newest report and updates next-up. Body `{"manual": true}` for the 1-minute window |
 | `GET /api/cron/daily` | `Bearer $CRON_SECRET` | Daily job (Vercel Cron sends the header) |
 | `GET /api/spike` | `Bearer $SPIKE_SECRET` | Phase 0 source checks from the server |
@@ -303,7 +320,8 @@ Migrations live in `supabase/migrations/`. Run them in order in the Supabase SQL
 | `injury_updates` | refresh, cron | One row per (player, game): status, reason, raw text, history, `ongoing`, `is_returning` |
 | `ingest_state` | refresh, cron | Rate-limit window, last report URL and time, last error |
 | `games`, `game_logs` | cron, backfill | Box scores with season, season type, competition type, `counts_for_stats` |
-| `next_up` | refresh, cron | Answer per (team, game, absent + returning set): calls, source, model attempts |
+| `next_up` | refresh, cron, redo | Answer per (team, game, absent + returning set): calls, source, model attempts, `computed_through`, `needs_recompute` |
+| `model_budget`, `reserve_model_calls()` | redo | Gemini calls used per day and purpose; atomic reservation within the daily allowance |
 | `player_stat_windows(ids, season)` | function | 7-, 14- and 30-game and season averages over games played that count for stats |
 
 Signed-in users can read the shared tables; only the secret key writes them. Anonymous access is refused everywhere.
@@ -321,6 +339,7 @@ Signed-in users can read the shared tables; only the secret key writes them. Ano
    | `ALLOWED_EMAIL` | The only address that gets sign-in links |
    | `CRON_SECRET`, `SPIKE_SECRET` | `openssl rand -hex 32` each |
    | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | Google AI Studio key, `https://generativelanguage.googleapis.com/v1beta/openai`, e.g. `gemini-3.5-flash-lite` |
+   | `NEXT_UP_REDO_DAILY_CALLS` | Optional; Gemini calls a day for manual next-up updates (default 60) |
 
 4. **Load data:**
    - `npm run sync-players`
