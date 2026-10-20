@@ -17,7 +17,7 @@ export default async function PeoplePage() {
   const users = (data?.users ?? []).sort((a, b) => (a.email ?? "").localeCompare(b.email ?? ""));
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-6">
+    <div className="page-panel">
       <AppHeader active="people" email={email} />
       <main className="mt-6 space-y-4">
         <section className="space-y-3 rounded-xl border border-border bg-surface p-4">

@@ -39,7 +39,7 @@ export default async function TeamsPage({ searchParams }: PageProps<"/teams">) {
   );
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-6">
+    <div className="page-panel">
       <AppHeader active="teams" email={auth?.claims?.email as string | undefined} />
 
       {data.directory.length === 0 && (

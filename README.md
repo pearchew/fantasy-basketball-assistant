@@ -1,4 +1,4 @@
-# Fantasy Basketball Assistant
+# Fantasy Team Injury Tracker
 
 A personal tool that watches NBA injury news and tells me which players stand to gain, starting with the ones on my fantasy teams.
 
