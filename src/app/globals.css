@@ -38,9 +38,22 @@
   --color-good: var(--good);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-pixel: var(--font-pixel);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+}
+
+/* Page column floating over the arena background. */
+@utility page-panel {
+  @apply mx-auto w-full max-w-4xl bg-background/75 px-4 py-6 shadow-2xl backdrop-blur-[2px] sm:my-6 sm:rounded-2xl;
+}
+
+/* Chunky arcade drop shadow so the title reads over the crowd. */
+.arcade-title {
+  text-shadow:
+    3px 3px 0 #c2410c,
+    6px 6px 0 #000;
 }

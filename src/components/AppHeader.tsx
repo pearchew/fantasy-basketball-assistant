@@ -13,7 +13,6 @@ export function AppHeader({ active, email }: { active: (typeof LINKS)[number]["k
   return (
     <header className="flex items-center justify-between gap-3">
       <nav className="flex items-center gap-1" aria-label="Main">
-        <span className="mr-3 hidden font-semibold sm:inline">Fantasy Basketball Assistant</span>
         {LINKS.filter((l) => admin || !l.adminOnly).map((l) => (
           <Link
             key={l.key}

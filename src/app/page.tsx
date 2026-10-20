@@ -172,7 +172,7 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-6">
+    <div className="page-panel">
       <AppHeader active="feed" email={auth?.claims?.email as string | undefined} />
 
       <p className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
