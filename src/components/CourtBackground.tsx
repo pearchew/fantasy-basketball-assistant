@@ -378,7 +378,7 @@ export function CourtBackground() {
       width={W}
       height={H}
       aria-hidden
-      className="pointer-events-none fixed inset-0 -z-10 h-full w-full bg-[#0b0b12] object-cover [image-rendering:pixelated]"
+      className="pointer-events-none fixed inset-0 -z-10 h-full w-full bg-[#0b0b12] object-cover [filter:var(--scene-filter)] [image-rendering:pixelated]"
     />
   );
 }

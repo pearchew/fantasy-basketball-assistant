@@ -10,10 +10,13 @@
   --accent-soft: #fdeee6;
   --danger: #b91c1c;
   --good: #15803d;
+  --scene-filter: none;
+  color-scheme: light;
 }
 
+/* Dark palette: follows the device unless a theme was picked by hand (html[data-theme]). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --background: #121211;
     --surface: #1c1c1a;
     --foreground: #ececea;
@@ -23,7 +26,23 @@
     --accent-soft: #3a2316;
     --danger: #f87171;
     --good: #4ade80;
+    --scene-filter: brightness(0.6) saturate(0.85);
+    color-scheme: dark;
   }
+}
+
+:root[data-theme="dark"] {
+  --background: #121211;
+  --surface: #1c1c1a;
+  --foreground: #ececea;
+  --muted: #9c9c96;
+  --border: #2e2e2b;
+  --accent: #fb923c;
+  --accent-soft: #3a2316;
+  --danger: #f87171;
+  --good: #4ade80;
+  --scene-filter: brightness(0.6) saturate(0.85);
+  color-scheme: dark;
 }
 
 @theme inline {
