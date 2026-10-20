@@ -10,11 +10,16 @@ const SYSTEM = `You are an NBA analyst helping a fantasy basketball manager deci
 For one team's game you get its depth chart (from recent box scores), who is out or doubtful, who is returning, and a candidate list for each of those players.
 For each OUT player, choose 2 or 3 players who gain (1 only if there is a single candidate), only from that player's candidates, best first.
 Each candidate comes with a rule note. A note saying the player started games this player missed is direct evidence: keep that player unless he is clearly unavailable.
+Some candidates also have a with/without split: his per-game change in minutes, shots (FGA), usage (FGA + 0.44 FTA + TOV) and points in the team's recent games this player missed, against the games he played (3+ games each side). Treat a clear rise as strong evidence and a clear fall as evidence against; prefer measured gains over position alone. Mention the numbers in the reason when you rely on them.
 For each RETURNING player, choose 0 to 2 players who lose minutes, only from that player's candidates.
 Types: "starter_replacement" (moves into the starting lineup), "bench_minutes" (more minutes off the bench), "starter_usage" (an existing starter takes on more shots and touches), "loses_minutes" (only for returning players).
 Use what you know about roles and positions, but the depth chart decides who is on the team.
 Each reason is one specific sentence under 25 words.
 Reply with JSON only: {"calls":[{"for":"<out or returning player's name>","name":"<candidate name>","type":"<type>","reason":"<sentence>"}]}`;
+
+const signed = (n: number) => `${n >= 0 ? "+" : "-"}${Math.abs(n).toFixed(1)}`;
+const splitText = (s: NonNullable<Candidate["split"]>) =>
+  `${signed(s.min)} min, ${signed(s.fga)} FGA, ${signed(s.usage)} usage, ${signed(s.pts)} pts per game`;
 
 export function buildPrompt(input: {
   depth: DepthChart;
@@ -29,7 +34,9 @@ export function buildPrompt(input: {
     .map((p) => `${p.starter ? "starter" : "bench  "} ${p.position || "?"} ${p.name}: ${p.mpg.toFixed(1)} min, started ${p.starts} of ${p.gp}${p.newArrival ? " (new to team; stats from previous team)" : ""}${input.questionable.has(p.id) ? " [questionable]" : ""}`)
     .join("\n");
   const list = (s: Subject) =>
-    (input.candidates.get(s.id) ?? []).map((c) => `\n    - ${c.name} [${c.type}] ${c.reason}`).join("") || " (none)";
+    (input.candidates.get(s.id) ?? [])
+      .map((c) => `\n    - ${c.name} [${c.type}] ${c.reason}${c.split ? ` {split, ${c.split.games} games without: ${splitText(c.split)}}` : ""}`)
+      .join("") || " (none)";
   return [
     `Team: ${input.depth.team}. Game: ${input.gameLabel}.`,
     `Depth chart, last ${input.depth.window.length} games:\n${rotation}`,

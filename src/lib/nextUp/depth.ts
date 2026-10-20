@@ -9,6 +9,10 @@ export type LogLine = {
   starter: boolean;
   did_not_play: boolean;
   min: number;
+  pts: number;
+  fga: number;
+  fta: number;
+  tov: number;
 };
 
 export type RosterPlayer = { id: string; name: string; position: string };
@@ -98,9 +102,30 @@ export function buildDepthChart(input: {
   return { team: input.team, window, players };
 }
 
+/** Games needed on each side before a with/without split counts as evidence. */
+export const MIN_SPLIT_GAMES = 3;
+
 /**
- * For the team's games in the last `lookback` where `playerId` did not play:
- * how often each other player started, and how often he started when `playerId` did play.
+ * A teammate's per-game change when `playerId` sat: average in the games he missed minus
+ * average in the games he played. Only games the teammate was available for (on the box
+ * score, including "did not play" as zero) count, so his own injuries don't skew it.
+ */
+export type Split = {
+  gamesWithout: number;
+  gamesWith: number;
+  min: number;
+  fga: number;
+  /** Shots + 0.44 x free throws + turnovers: the numerator of usage rate. */
+  usage: number;
+  pts: number;
+};
+
+export const isReliable = (s: Split | undefined): s is Split =>
+  !!s && s.gamesWithout >= MIN_SPLIT_GAMES && s.gamesWith >= MIN_SPLIT_GAMES;
+
+/**
+ * For the team's games in the last `lookback`, split by whether `playerId` played:
+ * who started when he sat (and when he played), and each teammate's with/without split.
  */
 export function startsWithAndWithout(playerId: string, teamLogs: LogLine[], lookback = 20) {
   const games = teamGames(teamLogs).slice(0, lookback);
@@ -110,10 +135,40 @@ export function startsWithAndWithout(playerId: string, teamLogs: LogLine[], look
   const missedSet = new Set(missed);
   const whenSat = new Map<string, number>();
   const whenPlayed = new Map<string, number>();
+  type Totals = { n: number; min: number; fga: number; usage: number; pts: number };
+  const zero = (): Totals => ({ n: 0, min: 0, fga: 0, usage: 0, pts: 0 });
+  const sides = new Map<string, { without: Totals; with: Totals }>();
+
   for (const l of teamLogs) {
-    if (!inLookback.has(l.event_id) || l.player_id === playerId || !l.starter) continue;
-    const m = missedSet.has(l.event_id) ? whenSat : whenPlayed;
-    m.set(l.player_id, (m.get(l.player_id) ?? 0) + 1);
+    if (!inLookback.has(l.event_id) || l.player_id === playerId) continue;
+    const sat = missedSet.has(l.event_id);
+    if (l.starter) {
+      const m = sat ? whenSat : whenPlayed;
+      m.set(l.player_id, (m.get(l.player_id) ?? 0) + 1);
+    }
+    const side = sides.get(l.player_id) ?? { without: zero(), with: zero() };
+    const t = sat ? side.without : side.with;
+    const on = played(l);
+    t.n++;
+    t.min += on ? l.min : 0;
+    t.fga += on ? l.fga : 0;
+    t.usage += on ? l.fga + 0.44 * l.fta + l.tov : 0;
+    t.pts += on ? l.pts : 0;
+    sides.set(l.player_id, side);
   }
-  return { missed: missed.length, played: games.length - missed.length, whenSat, whenPlayed };
+
+  const splits = new Map<string, Split>();
+  const avg = (t: Totals, k: keyof Omit<Totals, "n">) => t[k] / t.n;
+  for (const [id, { without, with: withHim }] of sides) {
+    if (!without.n || !withHim.n) continue;
+    splits.set(id, {
+      gamesWithout: without.n,
+      gamesWith: withHim.n,
+      min: avg(without, "min") - avg(withHim, "min"),
+      fga: avg(without, "fga") - avg(withHim, "fga"),
+      usage: avg(without, "usage") - avg(withHim, "usage"),
+      pts: avg(without, "pts") - avg(withHim, "pts"),
+    });
+  }
+  return { missed: missed.length, played: games.length - missed.length, whenSat, whenPlayed, splits };
 }

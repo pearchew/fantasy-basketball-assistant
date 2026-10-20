@@ -62,7 +62,7 @@ export function groupsFromUpdates(updates: GroupUpdate[], positions: Map<string,
   return groups;
 }
 
-const LOG_COLUMNS = "event_id, player_id, player_name, team_abbr, game_date, starter, did_not_play, min, season";
+const LOG_COLUMNS = "event_id, player_id, player_name, team_abbr, game_date, starter, did_not_play, min, pts, fga, fta, tov, season";
 
 /** Box scores for a team's recent games, preferring the current season once it has three games. */
 async function teamLogs(admin: SupabaseClient, team: string, beforeDate: string): Promise<LogLine[]> {

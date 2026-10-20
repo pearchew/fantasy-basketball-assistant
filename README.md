@@ -136,7 +136,8 @@ sequenceDiagram
 2. Skips groups that already have an answer, unless the answer was a rules fallback that can still be retried with the model (fewer than 3 attempts).
 3. For each remaining group (`computeGroup`):
    - **Depth chart:** loads the roster and the team's recent box scores (current season once it has 3 games), plus recent minutes elsewhere for new arrivals. **`buildDepthChart`** then marks starters by start rate and orders players by minutes.
-   - **Fill-ins:** **`startsWithAndWithout`** counts who started in the games each absent or returning player missed.
+   - **Evidence:** **`startsWithAndWithout`** looks at the team's last 20 games, split by whether each absent or returning player played. It counts who started in his place, and computes every teammate's **with/without split**: the per-game change in minutes, shots, usage (FGA + 0.44 FTA + TOV) and points. A split counts once there are 3+ games on each side (`isReliable`); games a teammate wasn't on the box score are left out, so his own injuries don't skew it.
+   - **Using the evidence:** candidates are ranked by their measured gains. Any player with a clear jump (+4 minutes or +2.5 usage) is added at any position. The numbers appear in the reasons, in Gemini's prompt, and in the feed ("Without Flagg (5 g): +6.1 min · +4.2 FGA · +5.0 pts").
    - **Rules:** **`ruleBeneficiaries`** builds candidates with `candidatesForAbsent` and `candidatesForReturner`, and takes the rule answer: one of each type, up to 3 per player.
    - **Model:** **`askModel`** sends **`buildPrompt`** (the depth chart plus each candidate's rule note) to Gemini.
    - **Validation:** **`validateModelCalls`** keeps only listed candidates, fixes invalid types, trims reasons with `oneSentence`, and gives any player the model left uncovered the rule answer.
@@ -247,9 +248,10 @@ The job also keeps the free Supabase project from pausing.
 | --- | --- | --- |
 | `teamGames` | `depth.ts` | A team's distinct games, newest first |
 | `buildDepthChart` | `depth.ts` | Starters by start rate, minutes order, new-arrival fallback |
-| `startsWithAndWithout` | `depth.ts` | Who started in the games a player missed, and when he played |
-| `candidatesForAbsent` | `rules.ts` | Fill-in starter, bench at the position, starters at or next to it |
-| `candidatesForReturner` | `rules.ts` | Players who started or played up while he sat |
+| `startsWithAndWithout` | `depth.ts` | Who started when a player sat, plus every teammate's with/without split (minutes, shots, usage, points) |
+| `isReliable` | `depth.ts` | A split counts with 3+ games each side |
+| `candidatesForAbsent` | `rules.ts` | Fill-in starter, bench at the position, starters at or next to it (ranked by measured gains), plus clear jumps at any position |
+| `candidatesForReturner` | `rules.ts` | Players who started, or whose minutes or usage rose, while he sat |
 | `ruleBeneficiaries` | `rules.ts` | Rule answer per group: merged calls, excluded and questionable handling |
 | `buildPrompt`, `askModel` | `model.ts` | Model prompt with rule notes; call with one JSON retry |
 | `validateModelCalls`, `oneSentence` | `model.ts` | Keeps only valid candidates, falls back to rules, trims reasons |

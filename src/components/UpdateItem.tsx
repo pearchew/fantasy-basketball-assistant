@@ -34,6 +34,23 @@ export function OwnerTags({ heldOn }: { heldOn: string[] }) {
   );
 }
 
+/** "Without Flagg (5 g): +6.1 min · +4.2 FGA · +5.0 pts", gains green and drops red. */
+function SplitLine({ split, who, returning }: { split: NonNullable<NextUpCall["split"]>; who: string; returning: boolean }) {
+  const last = who.split(" ").slice(1).join(" ") || who;
+  const part = (n: number, unit: string) => (
+    <span className={n >= 0.5 ? "text-good" : n <= -0.5 ? "text-danger" : ""}>
+      {n >= 0 ? "+" : "−"}
+      {Math.abs(n).toFixed(1)} {unit}
+    </span>
+  );
+  return (
+    <span className="block text-xs text-muted">
+      {returning ? `While ${last} was out` : `Without ${last}`} ({split.games} g): {part(split.min, "min")} · {part(split.fga, "FGA")} ·{" "}
+      {part(split.pts, "pts")}
+    </span>
+  );
+}
+
 function NextUp({ u, stats }: { u: FeedUpdate; stats: StatsLookup | null }) {
   if (!u.nextUp) return null;
   const title = u.returning ? "With him back, losing minutes:" : "Next up:";
@@ -53,6 +70,7 @@ function NextUp({ u, stats }: { u: FeedUpdate; stats: StatsLookup | null }) {
                 {b.questionable && <StatusBadge status="questionable" />}
               </span>
               <span className="text-muted">{b.reason}</span>
+              {b.split && b.split.vs === u.playerId && <SplitLine split={b.split} who={u.playerName} returning={u.returning} />}
               <StatsPanel playerId={b.player_id} stats={stats} />
             </li>
           ))}

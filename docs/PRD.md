@@ -122,10 +122,13 @@ For every player ruled out (out or doubtful), the tool names who is likely to ga
   1. For a starter, the bench player who started most often when he sat (in the team's last 20 games), or failing that the top bench player at his position.
   2. Bench players at his position.
   3. Starters at his position or a neighbouring one (G↔F↔C) who take on more usage.
+  4. **[built]** Any player with a clear measured jump while he sat (+4 minutes or +2.5 usage a game), at any position.
+
+  **[built] With/without splits:** for every teammate, the per-game change in minutes, shots (FGA), usage (FGA + 0.44 FTA + TOV) and points in the team's last 20 games, comparing games the player missed with games he played. A split counts with 3+ games on each side. Games a teammate wasn't on the box score are left out; a "did not play" counts as zero. Measured gains rank candidates within each rule, and appear in the reasons, in the model's prompt and in the feed.
 
   The rules supply about 6–8 candidates. The rule answer is the strongest of each type, up to three.
-- **Returns:** a player moving from out or doubtful to probable or available, within a game or since his previous game. Losers are players who started more while he sat, plus backups at his position.
-- **Model:** Gemini `gemini-3.5-flash-lite` (free tier) orders the candidates and writes the reasons. It sees the depth chart and each candidate's rule note (e.g. "started 3 of the 4 games he missed").
+- **Returns:** a player moving from out or doubtful to probable or available, within a game or since his previous game. Losers are players who started more while he sat, players whose minutes or usage clearly rose while he sat, and backups at his position.
+- **Model:** Gemini `gemini-3.5-flash-lite` (free tier) orders the candidates and writes the reasons. It sees the depth chart, each candidate's rule note (e.g. "started 3 of the 4 games he missed") and any with/without split, and is told to prefer measured gains over position alone.
   - Any name not among that player's candidates is rejected.
   - A player the model leaves without a valid call gets the rule answer.
   - Reasons are cut to one sentence; initials such as "P.J." are kept.

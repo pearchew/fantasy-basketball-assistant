@@ -23,7 +23,7 @@ const logs: LogLine[] = [];
 for (let from = 0; ; from += 1000) {
   const { data, error } = await db
     .from("game_logs")
-    .select("event_id, player_id, player_name, team_abbr, game_date, starter, did_not_play, min")
+    .select("event_id, player_id, player_name, team_abbr, game_date, starter, did_not_play, min, pts, fga, fta, tov")
     .eq("season", season)
     .eq("season_type", 2)
     .order("event_id")
@@ -71,7 +71,21 @@ console.log(`${cases.length} starter absences found; testing ${sample.length}${u
 const config = useModel ? llmConfigFromEnv() : null;
 if (useModel && !config) throw new Error("--model needs LLM_* settings in .env.local");
 
+// Usage proxy: shots plus trips to the line plus turnovers (the numerator of usage rate).
+const usage = (l: Pick<LogLine, "fga" | "fta" | "tov">) => l.fga + 0.44 * l.fta + l.tov;
+
 let hits = 0;
+let usageHits = 0;
+let named = 0;
+let namedSat = 0;
+let namedWithSplit = 0;
+let casesWithEvidence = 0;
+// Same measures, for absences with with/without history only.
+const ev = { named: 0, upMin: 0, upUsage: 0, minGain: 0, usageGain: 0 };
+let namedUpMin = 0;
+let namedUpUsage = 0;
+let minGain = 0;
+let usageGain = 0;
 let modelFailures = 0;
 for (const c of sample) {
   const before = (byTeam.get(c.team) ?? []).filter((l) => l.game_date < c.date);
@@ -92,18 +106,56 @@ for (const c of sample) {
     }
   }
 
-  // Did any named player beat his own average over his previous 14 games played?
+  // Did named players beat their own averages over their previous 14 games played?
   const results = picks.map((b) => {
     const history = (byPlayer.get(b.player_id) ?? []).filter((l) => l.game_date < c.date).sort((x, y) => y.game_date.localeCompare(x.game_date)).slice(0, 14);
     const avg = history.length ? history.reduce((n, l) => n + l.min, 0) / history.length : 0;
-    const tonight = logs.find((l) => l.event_id === c.eventId && l.player_id === b.player_id)?.min ?? 0;
-    return { b, avg, tonight, up: tonight > avg };
+    const avgUsage = history.length ? history.reduce((n, l) => n + usage(l), 0) / history.length : 0;
+    const line = logs.find((l) => l.event_id === c.eventId && l.player_id === b.player_id);
+    const tonight = line?.min ?? 0;
+    const tonightUsage = line ? usage(line) : 0;
+    // Didn't play: most likely out himself, which the live app would know from the report.
+    const sat = !line || line.did_not_play || line.min === 0;
+    return { b, avg, tonight, up: tonight > avg, avgUsage, tonightUsage, upUsage: tonightUsage > avgUsage, sat };
   });
   const hit = results.some((r) => r.up);
+  // Enough history to compare with and without: the absent player missed 3+ of the team's last 20.
+  const hasEvidence = [...sat.values()].some((s) => s.missed >= 3);
+  if (hasEvidence) {
+    casesWithEvidence++;
+    for (const r of results) {
+      if (r.sat) continue;
+      ev.named++;
+      if (r.up) ev.upMin++;
+      if (r.upUsage) ev.upUsage++;
+      ev.minGain += r.tonight - r.avg;
+      ev.usageGain += r.tonightUsage - r.avgUsage;
+    }
+  }
   if (hit) hits++;
+  if (results.some((r) => r.upUsage)) usageHits++;
+  for (const r of results) {
+    if (r.sat) {
+      namedSat++;
+      continue;
+    }
+    named++;
+    if (r.b.split) namedWithSplit++;
+    if (r.up) namedUpMin++;
+    if (r.upUsage) namedUpUsage++;
+    minGain += r.tonight - r.avg;
+    usageGain += r.tonightUsage - r.avgUsage;
+  }
   console.log(`${hit ? "HIT " : "MISS"} ${c.date} ${c.team}: ${c.absent.map((a) => a.name).join(" + ")} out`);
-  for (const r of results) console.log(`       ${r.up ? "↑" : " "} ${r.b.name} (${r.b.type}): ${r.tonight} min vs ${r.avg.toFixed(1)} avg`);
+  for (const r of results) {
+    console.log(`       ${r.up ? "↑" : " "}${r.upUsage ? "↑" : " "} ${r.b.name} (${r.b.type}): ${r.tonight} min vs ${r.avg.toFixed(1)} avg · usage ${r.tonightUsage.toFixed(1)} vs ${r.avgUsage.toFixed(1)}`);
+  }
 }
 const rate = sample.length ? hits / sample.length : 0;
 if (config) console.log(`\nModel failures (fell back to rules): ${modelFailures}`);
+const pct = (n: number, d: number) => `${d ? ((n / d) * 100).toFixed(0) : 0}%`;
+console.log(`\nNamed players who played: ${named} (${namedSat} more sat out that night, left out) · beat minutes avg ${pct(namedUpMin, named)} · beat usage avg ${pct(namedUpUsage, named)} · mean gain ${(minGain / Math.max(named, 1)).toFixed(1)} min, ${(usageGain / Math.max(named, 1)).toFixed(1)} usage`);
+console.log(`Named players backed by a with/without split: ${namedWithSplit}/${named} · absences with 3+ earlier missed games: ${casesWithEvidence}/${sample.length}`);
+console.log(`  …in those ${casesWithEvidence} absences: ${ev.named} named · beat minutes avg ${pct(ev.upMin, ev.named)} · beat usage avg ${pct(ev.upUsage, ev.named)} · mean gain ${(ev.minGain / Math.max(ev.named, 1)).toFixed(1)} min, ${(ev.usageGain / Math.max(ev.named, 1)).toFixed(1)} usage`);
+console.log(`Absences with a named player above his usage avg: ${usageHits}/${sample.length} = ${pct(usageHits, sample.length)}`);
 console.log(`\n${hits}/${sample.length} = ${(rate * 100).toFixed(0)}% (target 70%) → ${rate >= 0.7 ? "PASS" : "FAIL"}`);

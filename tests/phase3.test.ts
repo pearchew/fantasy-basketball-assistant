@@ -17,8 +17,9 @@ const players = {
 };
 const positions = new Map(Object.values(players).map((p) => [p.id, p.position]));
 
-function game(n: number, lineup: Record<string, [boolean, number]>): LogLine[] {
-  return Object.entries(lineup).map(([id, [starter, min]]) => ({
+/** lineup: player -> [starter, minutes, shots?]. Shots default to about one every 2.5 minutes. */
+function game(n: number, lineup: Record<string, [boolean, number] | [boolean, number, number]>): LogLine[] {
+  return Object.entries(lineup).map(([id, [starter, min, fga = Math.round(min / 2.5)]]) => ({
     event_id: `g${n}`,
     player_id: id,
     player_name: players[id as keyof typeof players].name,
@@ -27,6 +28,10 @@ function game(n: number, lineup: Record<string, [boolean, number]>): LogLine[] {
     starter,
     did_not_play: min === 0,
     min,
+    pts: fga,
+    fga,
+    fta: 0,
+    tov: 0,
   }));
 }
 
