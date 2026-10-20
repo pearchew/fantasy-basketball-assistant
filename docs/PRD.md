@@ -38,7 +38,7 @@ Before, that meant refreshing a news feed, working out who absorbs the minutes, 
 - Syncing automatically with my fantasy platform. The roster is entered by hand.
 - Statistical projections. Next-up calls are reasoned inferences, not model outputs.
 - Setting lineups, proposing trades or making waiver claims on my behalf. No alerts, and no tracking of who is a free agent in each league.
-- Supporting other users. One person, several teams. The app is deployed publicly, so it needs a login (see Access).
+- Open sign-up. **[built]** Access is invite-only: the admin gives specific people access (see Access); each gets their own teams and watchlist.
 - Category-specific advice per league format. The stats panel is the same for every team.
 
 ## Core user flow
@@ -53,9 +53,11 @@ Before, that meant refreshing a news feed, working out who absorbs the minutes, 
 
 ## Access
 
-- Sign in with a Supabase email magic link. Only the address in `ALLOWED_EMAIL` is sent one; any other address gets the same "check your inbox" reply.
-- **[built]** Supabase's built-in email allows only a few messages an hour, so `npm run login-link` mints a one-time sign-in link with the secret key and opens it in the browser, with no email involved.
-- **[built]** New sign-ups are switched off in Supabase after the first sign-in.
+- **[built]** Invite-only. The admin (`ADMIN_EMAIL`) gives people access on a People page: it creates the account and a one-time sign-in link to send them, with no email involved. Each person has their own teams, rosters and watchlist. The injury feed, next-up calls and stats are shared, so more people cost no extra model calls.
+- Sign in with a Supabase email magic link, sent to existing accounts only. Unknown addresses get the same "check your inbox" reply.
+- **[built]** Supabase's built-in email allows only a few messages an hour. Two workarounds: the People page's "New sign-in link", and `npm run login-link` for the admin. Both mint a one-time link with the secret key instead of sending email.
+- **[built]** New sign-ups are switched off in Supabase, so accounts are only created by the admin.
+- **[built]** The manual "Update next-up calls" button and its daily Gemini allowance are admin-only.
 - Row-level security on every table: my teams, rosters and watchlist are readable and writable only by my account. Shared data (players, injury updates, games, next-up) is read-only for signed-in users and written only by server jobs with the secret key. Anonymous requests are refused on every table and function.
 - The refresh endpoint needs a signed-in session. It fetches the report at most once per 10 minutes when called automatically, and at most once a minute when I press **Refresh**.
 - Scheduled and diagnostic endpoints (`/api/cron/daily`, `/api/spike`) need their own bearer secrets.

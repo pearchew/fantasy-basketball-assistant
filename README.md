@@ -7,7 +7,7 @@ It collapses three chores into one view:
 2. **Who is next up:** players likely to gain (or lose) minutes, from a box-score depth chart and a free language model.
 3. **How they've been playing:** averages over the last 7, 14 and 30 games next to the season average.
 
-Live app: https://fantasy-basketball-assistant-five.vercel.app (sign-in required)<br>
+Live app: https://fantasy-basketball-assistant-five.vercel.app (invite-only)<br>
 Product requirements, decisions and acceptance results: **[docs/PRD.md](docs/PRD.md)** · Data-source research: [docs/phase-0-findings.md](docs/phase-0-findings.md)
 
 Everything runs on free tiers with no card on file: Vercel Hobby, Supabase Free, ESPN's public site API, the NBA's injury report PDFs and Gemini's free tier.
@@ -183,10 +183,14 @@ The job also keeps the free Supabase project from pausing.
 - **`TeamForms`**: `createTeam`, `updateTeam` (name and format) and `deleteTeam`.
 - Every server action checks the session (`signedInClient`) before writing. Row-level security enforces ownership again in the database.
 
-### 7. Sign-in
+### 7. Access and sign-in (invite-only)
 
-- **`sendMagicLink`** sends a Supabase magic link, but only to `ALLOWED_EMAIL`. **`/auth/callback`** exchanges a `code` (PKCE) or verifies a `token_hash`, then redirects to `/`.
-- **`npm run login-link`** uses the secret key to mint a one-time `token_hash` link and opens it, which avoids the built-in email rate limit.
+- **Admin:** `ADMIN_EMAIL` (falling back to `ALLOWED_EMAIL`), checked by **`isAdmin`** (`src/lib/access.ts`). The admin sees **People** and the update button.
+- **Inviting:** on **People** (`/people`, admin only), **`inviteUser`** creates the account with `generateLink({ type: "invite" })` and returns a one-time `token_hash` link to copy and send. No email is sent. For someone who already has access, it returns a fresh sign-in link instead.
+- **Signing in:** **`sendMagicLink`** emails a link to existing accounts only (`shouldCreateUser: false`). Unknown addresses get the same "check your inbox" reply. **`/auth/callback`** exchanges a `code` (PKCE) or verifies a `token_hash` (`invite` or `magiclink`), then redirects to `/`.
+- **Without email:** **`npm run login-link`** mints and opens a one-time link for the admin. `-- --email friend@x.com` prints one to send instead. Both avoid the built-in email rate limit.
+- **Sign-ups stay off in Supabase,** so accounts are only ever created by the admin.
+- **What each person has:** their own teams, rosters and watchlist (row-level security), and the shared feed, next-up calls and stats.
 - **`updateSession`** (`src/lib/supabase/proxy.ts`, run by `src/proxy.ts`) refreshes the session cookie on every page request and redirects signed-out visitors to `/login`.
 
 ### 8. Time zone
@@ -261,7 +265,9 @@ The job also keeps the free Supabase project from pausing.
 | `createTeam`, `updateTeam`, `deleteTeam` | `src/app/actions.ts` | Team management (name 1–60 characters; format h2h_9cat or roto) |
 | `addToTeam`, `removeFromTeam` | `src/app/actions.ts` | Roster changes (adding the same player twice is ignored) |
 | `addToWatchlist`, `removeFromWatchlist` | `src/app/actions.ts` | Watchlist changes |
-| `sendMagicLink`, `signOut` | `src/app/actions.ts` | Sign-in limited to `ALLOWED_EMAIL`; sign-out |
+| `sendMagicLink`, `signOut` | `src/app/actions.ts` | Sign-in links for existing accounts only; sign-out |
+| `inviteUser` | `src/app/actions.ts` | Admin: creates an account (or reuses one) and returns a one-time sign-in link |
+| `adminEmail`, `isAdmin`, `isEmail` | `src/lib/access.ts` | Who the admin is; email shape check |
 | `createClient` | `src/lib/supabase/server.ts` | Supabase client acting as the signed-in user (RLS applies) |
 | `createAdminClient` | `src/lib/supabase/admin.ts` | Secret-key client for jobs (bypasses RLS; server only) |
 | `updateSession` | `src/lib/supabase/proxy.ts` | Session refresh and sign-in redirect for every page |
@@ -270,7 +276,7 @@ The job also keeps the free Supabase project from pausing.
 
 | Component | What it shows |
 | --- | --- |
-| `AppHeader` | Injuries / Teams navigation and sign-out |
+| `AppHeader` | Injuries / Teams (/ People for the admin) navigation and sign-out |
 | `RefreshControls` | Automatic refresh when stale, plus the Refresh button |
 | `NextUpUpdate` | "Update next-up calls" with cost, runs left, greyed-out states and batch progress |
 | `UpdateItem`, `StatusBadge`, `OwnerTags` | One injury update with history, report text, next-up calls and ownership |
@@ -286,9 +292,10 @@ The job also keeps the free Supabase project from pausing.
 | --- | --- | --- |
 | `GET /` | Session | Injury feed (`?date=YYYY-MM-DD` for a past day) |
 | `GET /teams` | Session | Teams, rosters and watchlist (`?view=all`, `?view=watchlist` or `?view=<team id>`) |
+| `GET /people` | Admin | Who has access; give access and copy one-time sign-in links |
 | `GET /login` | None | Sign-in form |
 | `GET /auth/callback` | One-time link | Completes sign-in |
-| `POST /api/next-up/redo` | Session | "Update next-up calls": `{"action": "start"}` reserves the run's Gemini calls and runs the first batch; `{"action": "continue"}` runs the next batch a minute later |
+| `POST /api/next-up/redo` | Admin | "Update next-up calls": `{"action": "start"}` reserves the run's Gemini calls and runs the first batch; `{"action": "continue"}` runs the next batch a minute later |
 | `POST /api/refresh` | Session | Ingests the newest report and updates next-up. Body `{"manual": true}` for the 1-minute window |
 | `GET /api/cron/daily` | `Bearer $CRON_SECRET` | Daily job (Vercel Cron sends the header) |
 | `GET /api/spike` | `Bearer $SPIKE_SECRET` | Phase 0 source checks from the server |
@@ -303,7 +310,7 @@ Run them from the project folder; each reads `.env.local`.
 | `npm test` | Unit tests (Vitest) |
 | `npm run lint` / `npm run build` | ESLint / production build (includes type checks) |
 | `npm run spike` | Phase 0 source checks from this machine; add `-- --json` for details |
-| `npm run login-link` | Opens a one-time sign-in link for localhost; add `-- https://<deployment>` for the live app |
+| `npm run login-link` | Opens a one-time admin sign-in link for localhost; add `-- https://<deployment>` for the live app, or `--email friend@x.com` to print a link to send |
 | `npm run sync-players` | Loads or refreshes the player directory now |
 | `npm run backfill-logs -- 2025-10-21 2026-06-20` | Loads box scores for a date range (safe to re-run) |
 | `npm run backtest-nextup` | Replays 20 past starter absences; add `-- --model` to include Gemini, `--season 2027` for another season |
@@ -336,7 +343,7 @@ Signed-in users can read the shared tables; only the secret key writes them. Ano
    | --- | --- |
    | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase → Project Settings → API Keys (public) |
    | `SUPABASE_SECRET_KEY` | Same page, Secret keys (`sb_secret_…`, server only) |
-   | `ALLOWED_EMAIL` | The only address that gets sign-in links |
+   | `ADMIN_EMAIL` | The admin's address (manages people, spends the manual allowance). `ALLOWED_EMAIL` still works |
    | `CRON_SECRET`, `SPIKE_SECRET` | `openssl rand -hex 32` each |
    | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | Google AI Studio key, `https://generativelanguage.googleapis.com/v1beta/openai`, e.g. `gemini-3.5-flash-lite` |
    | `NEXT_UP_REDO_DAILY_CALLS` | Optional; Gemini calls a day for manual next-up updates (default 60) |
@@ -345,7 +352,10 @@ Signed-in users can read the shared tables; only the secret key writes them. Ano
    - `npm run sync-players`
    - `npm run backfill-logs -- <season start> <yesterday>` (last season too, for backtests)
 5. **Deploy:** import the repo in Vercel and add the same variables. Make the two `NEXT_PUBLIC_` ones *Config* and the rest *Secret*. `vercel.json` schedules the daily job.
-6. **Sign in:** use the email link once (or `npm run login-link -- https://<deployment>`), then turn off **Allow new users to sign up** in Supabase.
+6. **Sign in and lock down:**
+   - Create your own account once: run `npm run login-link -- https://<deployment>`, or temporarily allow sign-ups and use the email link.
+   - Turn off **Allow new users to sign up** in Supabase.
+   - Invite people from **People**.
 
 ## Testing and checks
 

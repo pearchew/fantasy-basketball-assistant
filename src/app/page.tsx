@@ -7,6 +7,7 @@ import { TimeZoneControl } from "@/components/TimeZoneControl";
 import { OwnerTags, StatusBadge, TYPE_LABEL, UpdateItem } from "@/components/UpdateItem";
 import { isStale, loadFeed, STATUS_ORDER, type Game } from "@/lib/feed";
 import { ago, clock, dayLabel, gameDateLabel, localDate, when } from "@/lib/format";
+import { isAdmin } from "@/lib/access";
 import { redoStatus } from "@/lib/nextUp/redo";
 import { loadStats, type StatsLookup } from "@/lib/stats";
 import { StatsPanel } from "@/components/StatsPanel";
@@ -87,7 +88,7 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
     ...feed.mine.map((u) => u.playerId),
     ...feed.games.flatMap((g) => g.teams.flatMap((t) => t.updates.flatMap((u) => (u.nextUp ?? []).map((b) => b.player_id)))),
   ].filter((id): id is string => !!id);
-  const [stats, redo] = await Promise.all([loadStats(supabase, statIds), archiveDate ? null : redoStatus(supabase)]);
+  const [stats, redo] = await Promise.all([loadStats(supabase, statIds), archiveDate || !isAdmin(auth?.claims?.email) ? null : redoStatus(supabase)]);
 
   // Day headings follow the tip-off date in my time zone.
   const days: { label: string; games: Game[] }[] = [];

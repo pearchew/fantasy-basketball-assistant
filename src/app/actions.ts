@@ -4,6 +4,8 @@ import { refresh } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { LeagueFormat } from "@/lib/dashboard";
+import { isAdmin, isEmail } from "@/lib/access";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export type ActionResult = { error?: string; id?: string };
@@ -96,23 +98,56 @@ export async function removeFromWatchlist(playerId: string): Promise<ActionResul
 
 export type LoginState = { sent?: boolean; error?: string };
 
+async function requestOrigin(): Promise<string> {
+  const h = await headers();
+  return `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host")}`;
+}
+
 export async function sendMagicLink(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: "Enter a valid email address." };
+  if (!isEmail(email)) return { error: "Enter a valid email address." };
 
-  // Single-user app: only the owner's address gets a link. Same reply either way.
-  const allowed = process.env.ALLOWED_EMAIL?.trim().toLowerCase();
-  if (allowed && email !== allowed) return { sent: true };
-
-  const h = await headers();
-  const origin = `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host")}`;
+  // Invite-only: links go to existing accounts only, never creating one. Unknown addresses get
+  // the same reply, so the form can't be used to find out who has access.
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithOtp({
     email,
-    options: { emailRedirectTo: `${origin}/auth/callback` },
+    options: { emailRedirectTo: `${await requestOrigin()}/auth/callback`, shouldCreateUser: false },
   });
-  if (error) return { error: error.message };
+  if (error && error.code !== "otp_disabled" && !/signups? not allowed/i.test(error.message)) return { error: error.message };
   return { sent: true };
+}
+
+/** Admin only: the server action's caller must be signed in as the admin. */
+async function adminCaller() {
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getClaims();
+  if (!isAdmin(data?.claims?.email)) throw new Error("Only the admin can manage people.");
+}
+
+export type InviteResult = { link?: string; created?: boolean; error?: string };
+
+/**
+ * Admin: gives `email` access and returns a one-time sign-in link to send them (no email is
+ * sent). Creates the account if needed; for an existing account it's a fresh sign-in link.
+ */
+export async function inviteUser(rawEmail: string): Promise<InviteResult> {
+  await adminCaller();
+  const email = rawEmail.trim().toLowerCase();
+  if (!isEmail(email)) return { error: "Enter a valid email address." };
+
+  const admin = createAdminClient();
+  let created = true;
+  let { data, error } = await admin.auth.admin.generateLink({ type: "invite", email });
+  if (error && (error.code === "email_exists" || /already (been )?registered|already exists/i.test(error.message))) {
+    created = false;
+    ({ data, error } = await admin.auth.admin.generateLink({ type: "magiclink", email }));
+  }
+  if (error || !data?.properties?.hashed_token) return { error: error?.message ?? "Couldn't create a link." };
+
+  const type = created ? "invite" : "magiclink";
+  refresh();
+  return { created, link: `${await requestOrigin()}/auth/callback?token_hash=${data.properties.hashed_token}&type=${type}` };
 }
 
 export async function signOut() {

@@ -1,17 +1,20 @@
 import Link from "next/link";
 import { signOut } from "@/app/actions";
+import { isAdmin } from "@/lib/access";
 
 const LINKS = [
-  { key: "feed", href: "/", label: "Injuries" },
-  { key: "teams", href: "/teams", label: "Teams" },
+  { key: "feed", href: "/", label: "Injuries", adminOnly: false },
+  { key: "teams", href: "/teams", label: "Teams", adminOnly: false },
+  { key: "people", href: "/people", label: "People", adminOnly: true },
 ] as const;
 
 export function AppHeader({ active, email }: { active: (typeof LINKS)[number]["key"]; email?: string }) {
+  const admin = isAdmin(email);
   return (
     <header className="flex items-center justify-between gap-3">
       <nav className="flex items-center gap-1" aria-label="Main">
         <span className="mr-3 hidden font-semibold sm:inline">Fantasy Basketball Assistant</span>
-        {LINKS.map((l) => (
+        {LINKS.filter((l) => admin || !l.adminOnly).map((l) => (
           <Link
             key={l.key}
             href={l.href}

@@ -1,3 +1,4 @@
+import { isAdmin } from "@/lib/access";
 import { redo } from "@/lib/nextUp/redo";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -6,11 +7,12 @@ export const maxDuration = 60;
 
 // The feed's "Update next-up calls" button. Body {"action": "start"} reserves the run's
 // Gemini calls and runs the first batch; {"action": "continue"} runs the next batch once a
-// minute has passed. Signed-in only.
+// minute has passed. Admin only: the allowance is the admin's to spend.
 export async function POST(request: Request) {
   const supabase = await createClient();
   const { data } = await supabase.auth.getClaims();
   if (!data?.claims) return Response.json({ error: "unauthorized" }, { status: 401 });
+  if (!isAdmin(data.claims.email)) return Response.json({ error: "Only the admin can update next-up calls." }, { status: 403 });
 
   const body = await request.json().catch(() => ({}));
   const action = body?.action === "continue" ? "continue" : "start";
