@@ -13,7 +13,7 @@ Live app: https://fantasy-basketball-assistant-five.vercel.app · Code: `pearche
 | 0. Data spike | Done | Every source returns real data from a deployed Vercel function (iad1). The latest-report check skips until the first regular-season game day. |
 | 1. Teams | Done | Add or drop takes about 1 s; a player on two teams shows both names; trades update through the daily sync. |
 | 2. Feed | Done | 142 of 142 rows on a real game-day report parsed and matched, or listed for review. Live game day pending (season starts about Oct 20). |
-| 3. Next-up | Done | Backtest 18/20 (90%) with rules only and with rules + model, against a 70% target. The Cooper Flagg example names Risacher and Marshall. |
+| 3. Next-up | Done | Backtest 18/20 (90%) with rules only and with rules + model, against a 70% target; rules alone 441/486 (91%) across every 2025-26 starter absence. The Cooper Flagg example names Risacher and Marshall. |
 | 4. Stats | Done | 5 of 5 players match ESPN's official 2025-26 season averages. |
 
 ## Summary
@@ -144,7 +144,8 @@ For every player ruled out (out or doubtful), the tool names who is likely to ga
 | --- | --- |
 | Every out or doubtful update has at least one named beneficiary with a one-sentence reason | Rules fall back to the busiest available player when no positional candidate exists. The model never leaves an absent player uncovered |
 | No beneficiary is himself out or doubtful for the same game | Excluded before candidates are built; the model can only pick from candidates. Unit-tested |
-| Backtest: in at least 70% of 15–20 past absences, a named beneficiary beats his 14-game minutes average | 20 regular-starter absences from 2025-26, using only earlier box scores: **rules 18/20 (90%)**, **rules + model 18/20 (90%)**. Both misses are honest: one named replacement also sat that night (unknowable without that night's report), one where everyone named played slightly below average |
+| Backtest: in at least 70% of 15–20 past absences, a named beneficiary beats his 14-game minutes average | 20 regular-starter absences from 2025-26, using only earlier box scores: **rules 18/20 (90%)**, **rules + model 18/20 (90%)**. Both misses are honest: one named replacement also sat that night (unknowable without that night's report), one where everyone named played slightly below average. Rules alone across all 486 starter absences: **441/486 (91%)** |
+| (Added) Per named player, leaving out anyone who sat that night: how often he beats his 14-game minutes and usage averages | Rules, all 486 absences: 65% beat minutes, 63% beat usage, +2.7 min and +1.8 usage a game on average (64% / 62% / +2.5 / +1.7 before splits). In the 191 absences with 3+ earlier missed games: 69% / 64% / +3.2 / +1.9 (67% / 63% / +2.7 / +1.7 before splits). On the 20-absence sample: rules 61% / 53%, rules + model 58% / 51% with 4 of 20 model calls failing on a busy API. The model doesn't yet beat the rules; it mostly rewords them |
 | The Cooper Flagg example names Marshall and Risacher, or explains why not | With the 2026-27 Dallas roster: Risacher into the starting lineup, Marshall more usage |
 
 ## Feature 4: Recent player stats
@@ -201,7 +202,7 @@ For every player ruled out (out or doubtful), the tool names who is likely to ga
 | 0. Data spike | Source adapters; `/api/spike` and `npm run spike` checks | Each source returns real data from a deployed Vercel function | Passed from Vercel iad1 |
 | 1. Teams | Login, teams, rosters, watchlist, daily player sync | Rebuild all teams in under 10 minutes | Met |
 | 2. Feed | Report ingest, history, matching, game-grouped feed, time zones, refresh, archive; league-wide game logs (2025-26 backfilled: 1,327 games, 34,881 player lines) | Feature 2 accuracy criterion met on one game day | Met on 2026-03-15 data; live confirmation pending |
-| 3. Next-up | Depth charts, rules, model, storage, return calls, feed display, backtest | Backtest meets 70% and the Flagg example is sensible | 90% / 90%; Flagg example passes |
+| 3. Next-up | Depth charts, rules, model, storage, return calls, feed display, backtest | Backtest meets 70% and the Flagg example is sensible | 90% / 90% (rules 91% on all 486 absences); Flagg example passes |
 | 4. Stats | Stat windows, panels on Teams and feed, All-Star and Cup final exclusion, spot check | 5-player spot check matches a reference | 5 of 5 |
 | Later | Roster sync from fantasy platforms; category advice per league format; alerts | Out of scope for v1 | |
 
@@ -251,6 +252,7 @@ For every player ruled out (out or doubtful), the tool names who is likely to ga
 | Archive | `/?date=` shows any past game day |
 | Next-up candidates | Widened to about 6–8 per player so the model has real choice; rule notes shown to the model (lifted the model's backtest from 16/20 to 18/20) |
 | Model limits | At most 8 calls per refresh, stop at the first 429, retry later up to 3 times |
+| Slow model replies | Free-tier Gemini took 25–45 s a call on 2026-10-20 (normally about 1 s) and sometimes returned 503. Model timeout 50 s, refresh, daily and update routes allowed 300 s (the Hobby maximum), and a run stops starting model calls once one might not finish; those games keep the rules answer until a later run |
 | Depth window | Current season once it has 3 games; otherwise the most recent games |
 | Stats season | "Current" means the latest regular season with games stored |
 | Official games | All-Star games and the NBA Cup final excluded from stats (found by the spot check) |
