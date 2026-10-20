@@ -13,7 +13,7 @@ Live app: https://fantasy-basketball-assistant-five.vercel.app · Code: `pearche
 | 0. Data spike | Done | Every source returns real data from a deployed Vercel function (iad1). The latest-report check skips until the first regular-season game day. |
 | 1. Teams | Done | Add or drop takes about 1 s; a player on two teams shows both names; trades update through the daily sync. |
 | 2. Feed | Done | 142 of 142 rows on a real game-day report parsed and matched, or listed for review. Live game day pending (season starts about Oct 20). |
-| 3. On/off splits | Done (v4) | The database function matches a plain recomputation from box scores for 6 players across 2 seasons; about 0.3 s for a full day's injured players. Replaced the v3 next-up calls (backtest 90%), which named players but added little the numbers didn't show. |
+| 3. On/off splits | Done (v4) | The database function matches a plain recomputation from box scores for 7 players across 2 seasons; about 0.3 s for a full day's injured players. Replaced the v3 next-up calls (backtest 90%), which named players but added little the numbers didn't show. |
 | 4. Stats | Done | 5 of 5 players match ESPN's official 2025-26 season averages. |
 
 ## Summary
@@ -114,7 +114,8 @@ Before, that meant refreshing a news feed, working out who absorbs the minutes, 
 **Requirements (as built)**
 
 - **Which games:** regular-season games that count for stats, played before the day being viewed, this season and last.
-  - If he played for another team that season, only the team's games since his first appearance for it. Otherwise the whole season, so a player hurt since opening night has sat every game.
+  - If he played for another team that season, only the team's games since his first appearance for it. If he played for this team, the whole season.
+  - With no games anywhere: the whole of the season under way, so a player hurt since opening night has sat every game; nothing for an earlier season, since box scores can't tell an injured player from one who wasn't in the league (a rookie, say).
   - He sat a game unless he has a box-score line with minutes.
 - **Which teammates:** the current active roster. A teammate's averages on each side cover the games he was on the box score; a "did not play" counts as zero, so his own absences don't skew the split.
 - **What's shown, per game:** starts, MIN, PTS, REB, AST, STL, BLK, 3PM, TO, FG% and FT% (total makes over attempts). The top line is the average when he sat; under it, the change from when he played. Clear gains are green and drops red, on the same bar as the recent-form table (10% and 0.3 for counting stats, turnovers inverted; 3 points for percentages).
@@ -130,9 +131,9 @@ Before, that meant refreshing a news feed, working out who absorbs the minutes, 
 
 | Criterion | Result |
 | --- | --- |
-| The database function returns the same splits as a plain recomputation from box scores | `npm run spot-check-onoff`: Irving, Haliburton, Tatum, Leonard, Flagg and Davis, both seasons, all match (games, minutes, points, rebounds, turnovers, shots) |
+| The database function returns the same splits as a plain recomputation from box scores | `npm run spot-check-onoff`: Irving, Haliburton, Tatum, Flagg, Barlow, Bittle and Swain, both seasons, all match (games, minutes, points, rebounds, turnovers, shots) |
 | Fast enough to compute on every page load | About 0.3 s for all 17 players on the Oct 20–21 report; about 0.35 s for one player |
-| A player out since opening night still gets a table | Irving and Haliburton (out all 2025-26): 82 games sat, every current teammate listed |
+| A player out since opening night still gets a table, and a rookie doesn't get last season's | In the season under way, a player with no games has sat every game. For an earlier season he gets no table: Bittle and Swain (2026 rookies) no longer show 82 games sat in 2025-26. Irving and Haliburton (out all 2025-26) get their tables once 2026-27 games are stored |
 | No teammate out or doubtful for the same game is shown | Dropped before display. Unit-tested |
 | Readable on a phone | Table scrolls sideways with names pinned; the page itself doesn't scroll sideways at 375 px |
 
@@ -191,7 +192,7 @@ Before, that meant refreshing a news feed, working out who absorbs the minutes, 
 | 1. Teams | Login, teams, rosters, watchlist, daily player sync | Rebuild all teams in under 10 minutes | Met |
 | 2. Feed | Report ingest, history, matching, game-grouped feed, time zones, refresh, archive; league-wide game logs (2025-26 backfilled: 1,327 games, 34,881 player lines) | Feature 2 accuracy criterion met on one game day | Met on 2026-03-15 data; live confirmation pending |
 | 3. Next-up (v3) | Depth charts, rules, model, storage, return calls, feed display, backtest | Backtest meets 70% and the Flagg example is sensible | 90% / 90% (rules 91% on all 486 absences); Flagg example passes. Replaced in v4 |
-| 3. On/off splits (v4) | `on_off_splits`, tables in the feed, season toggle, my gains, spot check | Function matches a plain recomputation | 6 of 6 players, both seasons |
+| 3. On/off splits (v4) | `on_off_splits`, tables in the feed, season toggle, my gains, spot check | Function matches a plain recomputation | 7 of 7 players, both seasons |
 | 4. Stats | Stat windows, panels on Teams and feed, All-Star and Cup final exclusion, spot check | 5-player spot check matches a reference | 5 of 5 |
 | Later | Roster sync from fantasy platforms; category advice per league format; alerts | Out of scope for v1 | |
 
@@ -254,6 +255,6 @@ Before, that meant refreshing a news feed, working out who absorbs the minutes, 
 | What Feature 3 shows | Every teammate's numbers when the player sat versus played, in place of up to three named players with a one-sentence reason. The reasons added little for picking players; the splits are what I act on |
 | Gemini | Removed. In the last backtest (20 absences) it did no better than the rules: 58% of named players beat their minutes average with Gemini, 61% without. Free-tier replies took 25–45 s, and 4 of 20 calls failed with 503s |
 | Freshness | Computed on page load from box scores, so the "Update next-up calls" button, its daily allowance and stored calls are gone |
-| Seasons | This season and last, with a toggle; long absences count from opening night |
+| Seasons | This season and last, with a toggle; in the season under way, long absences count from opening night |
 | Old tables | `next_up` and `model_budget` are no longer used; `0007_on_off.sql` lists the commands to drop them |
 | v3 results kept for the record | Rules alone: 441/486 starter absences (91%) had a named player beat his 14-game minutes; 65% of named players beat their minutes and 63% their usage. The splits were the strongest signal in those rules |

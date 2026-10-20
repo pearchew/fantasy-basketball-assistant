@@ -32,10 +32,12 @@ as $$
       and l.counts_for_stats
       and l.game_date < p_before
   ),
-  -- Which of the team's games he could have sat. If he played for another team that season,
-  -- only games since his first appearance here; otherwise the whole season, so a player
-  -- injured since opening night counts as sitting every game. Materialized so the lookups
-  -- run once per player and season, not once per box-score line.
+  -- Which of the team's games he could have sat, per season:
+  --   played for another team that season  -> only games since his first appearance here;
+  --   played for this team that season      -> the whole season (he was here, sometimes hurt);
+  --   no games anywhere, in the season under way -> the whole season (hurt since opening night);
+  --   no games anywhere, in an earlier season    -> none: he may not have been in the league.
+  -- Materialized so the lookups run once per player and season, not once per box-score line.
   since as materialized (
     select s.player_id, s.team_abbr, x.season,
            case
@@ -49,7 +51,14 @@ as $$
                where o.player_id = s.player_id and o.team_abbr = s.team_abbr and o.season = x.season
                  and o.season_type = 2 and o.counts_for_stats and o.game_date < p_before
              )
-             else (
+             when exists (
+               select 1 from public.game_logs o
+               where o.player_id = s.player_id and o.season = x.season and o.season_type = 2
+                 and o.team_abbr = s.team_abbr and o.game_date < p_before
+             )
+             -- ESPN names a season by the year it ends; a new one starts in the autumn.
+             or x.season = extract(year from p_before)::int + (extract(month from p_before) >= 8)::int
+             then (
                select min(o.game_date) from public.game_logs o
                where o.team_abbr = s.team_abbr and o.season = x.season
                  and o.season_type = 2 and o.counts_for_stats and o.game_date < p_before

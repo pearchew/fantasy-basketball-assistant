@@ -129,7 +129,7 @@ For each injured player, how his teammates did in the team's games he sat versus
 
 1. **Who gets a table** (`hasOnOff`): matched players who are out, doubtful or questionable (not G League assignments), or returning. Out, doubtful and returning tables open by default; questionable ones start collapsed.
 2. **The Postgres function `on_off_splits(players, teams, seasons, before)`** does the work in one call per 60 players, over this season and last, using regular-season games that count for stats and were played before the day being viewed:
-   - **His games:** if he played for another team that season, the team's games from his first appearance for it. Otherwise the whole season, so a player hurt since opening night has sat every game.
+   - **His games:** if he played for another team that season, the team's games from his first appearance for it. If he played for this team, the whole season. With no games anywhere, the whole of the season under way (hurt since opening night), but nothing for an earlier season, when he may not have been in the league.
    - **Sat or played:** he sat a game unless he has a box-score line with minutes in it.
    - **Teammates:** current active roster only. Each teammate's averages on each side cover the games he was on the box score (a "did not play" counts as zero), so his own absences don't skew them. Starts are counted, and FG% and FT% are total makes over attempts.
 3. **`toOnOff`** turns the rows into one table per player and season, sorted by minutes gained. Rows with 3+ games on both sides come first, then thin ones (`MIN_GAMES`). Seasons he didn't spend with the team are dropped.

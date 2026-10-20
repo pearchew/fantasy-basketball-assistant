@@ -44,7 +44,12 @@ async function teamLines(team: string): Promise<Line[]> {
 /** The same splits, the long way round. */
 function recompute(subject: string, lines: Line[], roster: Set<string>, s: number, elsewhere: boolean) {
   const mine = lines.filter((l) => l.season === s);
-  // Traded in that season: from his first game here. Otherwise the whole season.
+  const here = mine.some((l) => l.player_id === subject);
+  const now = new Date(`${before}T12:00:00Z`);
+  const underWay = s === now.getUTCFullYear() + (now.getUTCMonth() >= 7 ? 1 : 0);
+  // Traded in that season: from his first game here. Here all season, or out since opening night of
+  // the season under way: the whole season. No games anywhere in an earlier season: nothing.
+  if (!elsewhere && !here && !underWay) return null;
   const first = mine.filter((l) => !elsewhere || l.player_id === subject).map((l) => l.game_date).sort()[0];
   if (!first) return null;
   const games = new Map<string, boolean>(); // event -> sat
