@@ -5,7 +5,8 @@ import { syncPlayers } from "@/lib/playerSync";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { addDays, easternDate } from "@/lib/time";
 
-export const maxDuration = 60;
+// Vercel Hobby with Fluid compute allows up to 300 s; slow free-tier model replies need the room.
+export const maxDuration = 300;
 
 async function run<T>(fn: () => Promise<T>) {
   try {

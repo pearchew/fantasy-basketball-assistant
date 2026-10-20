@@ -4,7 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { easternDate } from "@/lib/time";
 
-export const maxDuration = 60;
+// Vercel Hobby with Fluid compute allows up to 300 s; slow free-tier model replies need the room.
+export const maxDuration = 300;
 
 // Called by the feed when its data is over 10 minutes old, or by the Refresh button
 // (`{"manual": true}`, allowed once a minute). Signed-in only.

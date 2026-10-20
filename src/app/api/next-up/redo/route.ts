@@ -3,7 +3,8 @@ import { redo } from "@/lib/nextUp/redo";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
-export const maxDuration = 60;
+// Vercel Hobby with Fluid compute allows up to 300 s; slow free-tier model replies need the room.
+export const maxDuration = 300;
 
 // The feed's "Update next-up calls" button. Body {"action": "start"} reserves the run's
 // Gemini calls and runs the first batch; {"action": "continue"} runs the next batch once a

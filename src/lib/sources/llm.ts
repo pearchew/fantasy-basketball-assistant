@@ -6,6 +6,9 @@ import { fetchWithTimeout } from "./http";
 
 export type LlmConfig = { baseUrl: string; apiKey: string; model: string };
 
+/** Free-tier replies usually take about a second but can take 30-45 s when the API is busy. */
+export const LLM_TIMEOUT_MS = 50_000;
+
 export function llmConfigFromEnv(): LlmConfig | null {
   const { LLM_BASE_URL, LLM_API_KEY, LLM_MODEL } = process.env;
   if (!LLM_BASE_URL || !LLM_API_KEY || !LLM_MODEL) return null;
@@ -18,7 +21,7 @@ type ChatResponse = { choices: { message: { content: string } }[] };
 export async function chatJson<T>(config: LlmConfig, system: string, user: string): Promise<T> {
   const res = await fetchWithTimeout(`${config.baseUrl}/chat/completions`, {
     method: "POST",
-    timeoutMs: 30_000,
+    timeoutMs: LLM_TIMEOUT_MS,
     headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: config.model,

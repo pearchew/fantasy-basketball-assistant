@@ -2,7 +2,7 @@
 // (team, game, set of absent and returning players), computed once.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { mapLimit } from "../sources/http";
-import { llmConfigFromEnv } from "../sources/llm";
+import { LLM_TIMEOUT_MS, llmConfigFromEnv } from "../sources/llm";
 import type { InjuryStatus } from "../sources/nbaInjuryReport";
 import { buildDepthChart, startsWithAndWithout, type LogLine } from "./depth";
 import { askModel, buildPrompt, validateModelCalls } from "./model";
@@ -194,7 +194,14 @@ export async function loadAnswers(db: SupabaseClient, groups: Group[]): Promise<
  * 8-10 calls a minute: groups past the budget wait for a later run (or get the rule answer
  * now, if they have no answer yet).
  */
-export async function updateNextUp(admin: SupabaseClient, fromDate: string, { modelBudget = 8 } = {}) {
+export async function updateNextUp(
+  admin: SupabaseClient,
+  fromDate: string,
+  // Routes may run 300 s; leave room for the last model call to finish and the response to go out.
+  { modelBudget = 8, timeBudgetMs = 220_000 } = {},
+) {
+  const started = Date.now();
+  const canStartModelCall = () => Date.now() - started < timeBudgetMs - LLM_TIMEOUT_MS;
   const groups = await loadGroups(admin, fromDate);
   const existing = await loadAnswers(admin, groups);
 
@@ -212,7 +219,8 @@ export async function updateNextUp(admin: SupabaseClient, fromDate: string, { mo
   let budget = modelBudget;
   const summary = { groups: groups.length, computed: 0, model: 0, rules: 0, errors: [] as string[] };
   await mapLimit(todo, 3, async (g) => {
-    const useModel = budget-- > 0;
+    // No new model call that might not finish in time; this group waits for a later run.
+    const useModel = canStartModelCall() && budget-- > 0;
     // A flagged answer keeps showing until the model can redo it; don't overwrite it with rules.
     if (!useModel && existing.get(g.key)?.needs_recompute) return;
     try {
