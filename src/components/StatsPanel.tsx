@@ -1,6 +1,6 @@
-import { trend, type StatKey, type StatsLookup, type StatWindow } from "@/lib/stats";
+import { trend, type PlayerStats, type StatKey, type StatsLookup, type StatWindow } from "@/lib/stats";
 
-const COLUMNS: { key: StatKey; label: string; attempts?: "fga" | "fta" }[] = [
+export const COLUMNS: { key: StatKey; label: string; attempts?: "fga" | "fta" }[] = [
   { key: "min", label: "MIN" },
   { key: "pts", label: "PTS" },
   { key: "reb", label: "REB" },
@@ -13,10 +13,10 @@ const COLUMNS: { key: StatKey; label: string; attempts?: "fga" | "fta" }[] = [
   { key: "ftPct", label: "FT%", attempts: "fta" },
 ];
 
-const fmt = (key: StatKey, v: number | null) =>
+export const fmt = (key: StatKey, v: number | null) =>
   v === null ? "–" : key === "fgPct" || key === "ftPct" ? v.toFixed(3).replace(/^0/, "") : v.toFixed(1);
 
-const TREND_CLASS = { up: "text-good", down: "text-danger" } as const;
+export const TREND_CLASS = { up: "text-good", down: "text-danger" } as const;
 
 function summary(windows: StatWindow[]): string {
   const w = windows.find((x) => x.size === 14 && x.games > 0) ?? windows.find((x) => x.games > 0);
@@ -25,28 +25,16 @@ function summary(windows: StatWindow[]): string {
   return `${label}: ${w.pts.toFixed(1)} pts · ${w.reb.toFixed(1)} reb · ${w.ast.toFixed(1)} ast · ${w.min.toFixed(1)} min`;
 }
 
-/** Recent form for one player: a one-line summary that opens into the full window table. */
-export function StatsPanel({ playerId, stats }: { playerId: string; stats: StatsLookup | null }) {
-  if (!stats) return null;
-  if (!stats.ok) {
-    return <p className="mt-1 text-xs text-muted">Stats unavailable right now ({stats.error}).</p>;
-  }
-  const player = stats.byPlayer[playerId];
-  if (!player?.windows.length) {
-    return <p className="mt-1 text-xs text-muted">No games played in {stats.seasonLabel} yet.</p>;
-  }
+/** The last 7 / 14 / 30 / season table for one player, with its footnote. */
+export function StatsTable({ player, seasonLabel }: { player: PlayerStats; seasonLabel: string }) {
   const season = player.windows.find((w) => w.size === 0)!;
-
   return (
-    <details className="mt-1 text-xs">
-      <summary className="cursor-pointer text-muted select-none">
-        {summary(player.windows)} <span className="underline">stats</span>
-      </summary>
+    <>
       <div className="mt-1 overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[34rem] text-right tabular-nums">
           <thead>
             <tr className="text-muted">
-              <th className="px-2 py-1 text-left font-medium">{stats.seasonLabel}</th>
+              <th className="px-2 py-1 text-left font-medium">{seasonLabel}</th>
               <th className="px-2 py-1 font-medium">GP</th>
               {COLUMNS.map((c) => (
                 <th key={c.key} className="px-2 py-1 font-medium">
@@ -85,6 +73,26 @@ export function StatsPanel({ playerId, stats }: { playerId: string; stats: Stats
         {player.windows.some((w) => w.size > 0 && w.games < w.size) && " * fewer games than the window."} FG% and FT% are
         total makes over attempts; attempts per game in brackets.
       </p>
+    </>
+  );
+}
+
+/** Recent form for one player: a one-line summary that opens into the full window table. */
+export function StatsPanel({ playerId, stats }: { playerId: string; stats: StatsLookup | null }) {
+  if (!stats) return null;
+  if (!stats.ok) {
+    return <p className="mt-1 text-xs text-muted">Stats unavailable right now ({stats.error}).</p>;
+  }
+  const player = stats.byPlayer[playerId];
+  if (!player?.windows.length) {
+    return <p className="mt-1 text-xs text-muted">No games played in {stats.seasonLabel} yet.</p>;
+  }
+  return (
+    <details className="mt-1 text-xs">
+      <summary className="cursor-pointer text-muted select-none">
+        {summary(player.windows)} <span className="underline">stats</span>
+      </summary>
+      <StatsTable player={player} seasonLabel={stats.seasonLabel} />
     </details>
   );
 }

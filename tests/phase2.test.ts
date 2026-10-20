@@ -158,7 +158,6 @@ function update(over: Partial<FeedUpdate>): FeedUpdate {
     returning: false,
     history: [{ status: "out", reason: "", report_time: "" }],
     heldOn: [],
-    nextUp: null,
     ...over,
   };
 }

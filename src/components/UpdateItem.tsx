@@ -1,99 +1,29 @@
-import type { FeedUpdate, NextUpCall } from "@/lib/feed";
+import type { FeedUpdate } from "@/lib/feed";
 import { when } from "@/lib/format";
+import type { OnOffTableData } from "@/lib/onOff";
 import type { StatsLookup } from "@/lib/stats";
+import { OnOffTable } from "./OnOffTable";
+import { OwnerTags, StatusBadge } from "./Badges";
 import { StatsPanel } from "./StatsPanel";
 import { gameStartUtc } from "@/lib/time";
 
-const STATUS_STYLE: Record<FeedUpdate["status"], string> = {
-  out: "bg-danger text-white",
-  doubtful: "bg-accent text-white",
-  questionable: "bg-accent-soft text-accent",
-  probable: "border border-border text-foreground",
-  available: "border border-border text-muted",
-};
-
 const label = (s: string) => s[0].toUpperCase() + s.slice(1);
 
-export const TYPE_LABEL: Record<NextUpCall["type"], string> = {
-  starter_replacement: "Into the starting lineup",
-  bench_minutes: "More bench minutes",
-  starter_usage: "More usage",
-  loses_minutes: "Loses minutes",
-};
-
-export function OwnerTags({ heldOn }: { heldOn: string[] }) {
-  if (!heldOn.length) return <span className="text-xs text-muted">Unowned</span>;
-  return (
-    <>
-      {heldOn.map((t) => (
-        <span key={t} className="rounded bg-accent-soft px-1.5 py-0.5 text-xs text-accent">
-          {t}
-        </span>
-      ))}
-    </>
-  );
-}
-
-/** "Without Flagg (5 g): +6.1 min · +4.2 FGA · +5.0 pts", gains green and drops red. */
-function SplitLine({ split, who, returning }: { split: NonNullable<NextUpCall["split"]>; who: string; returning: boolean }) {
-  const last = who.split(" ").slice(1).join(" ") || who;
-  const part = (n: number, unit: string) => (
-    <span className={n >= 0.5 ? "text-good" : n <= -0.5 ? "text-danger" : ""}>
-      {n >= 0 ? "+" : "−"}
-      {Math.abs(n).toFixed(1)} {unit}
-    </span>
-  );
-  return (
-    <span className="block text-xs text-muted">
-      {returning ? `While ${last} was out` : `Without ${last}`} ({split.games} g): {part(split.min, "min")} · {part(split.fga, "FGA")} ·{" "}
-      {part(split.pts, "pts")}
-    </span>
-  );
-}
-
-function NextUp({ u, stats }: { u: FeedUpdate; stats: StatsLookup | null }) {
-  if (!u.nextUp) return null;
-  const title = u.returning ? "With him back, losing minutes:" : "Next up:";
-  return (
-    <div className="mt-2 rounded-lg bg-background px-3 py-2">
-      <p className="text-xs font-medium tracking-wide text-muted uppercase">{title}</p>
-      {u.nextUp.length === 0 ? (
-        <p className="mt-1 text-sm text-muted">Working out who benefits; refresh in a moment.</p>
-      ) : (
-        <ul className="mt-1 space-y-1.5">
-          {u.nextUp.map((b) => (
-            <li key={b.player_id} className="text-sm">
-              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="font-medium">{b.name}</span>
-                <span className="text-xs text-muted">{TYPE_LABEL[b.type]}</span>
-                <OwnerTags heldOn={b.heldOn} />
-                {b.questionable && <StatusBadge status="questionable" />}
-              </span>
-              <span className="text-muted">{b.reason}</span>
-              {b.split && b.split.vs === u.playerId && <SplitLine split={b.split} who={u.playerName} returning={u.returning} />}
-              <StatsPanel playerId={b.player_id} stats={stats} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-export function StatusBadge({ status }: { status: FeedUpdate["status"] }) {
-  return <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${STATUS_STYLE[status]}`}>{label(status)}</span>;
-}
-
-/** One player's update. `showGame` adds the matchup and tip-off, for lists outside a game's dropdown. */
+/**
+ * One player's update. `showGame` adds the matchup and tip-off, for lists outside a game's dropdown.
+ * `onOff`: his teammates' splits (a string when they couldn't be loaded); absent when not applicable.
+ */
 export function UpdateItem({
   u,
   tz,
   stats = null,
+  onOff,
   showGame = false,
 }: {
   u: FeedUpdate;
   tz: string;
   stats?: StatsLookup | null;
+  onOff?: OnOffTableData | string;
   showGame?: boolean;
 }) {
   const trail = u.history.map((h) => label(h.status));
@@ -113,9 +43,13 @@ export function UpdateItem({
         {u.heldOn.length > 0 && <OwnerTags heldOn={u.heldOn} />}
       </div>
       {u.reason && <p className="mt-1 text-sm">{u.reason}</p>}
-      {/* My own players get their form here; next-up names get it in the list below. */}
+      {/* My own players get their form here; teammates get it inside the on/off table. */}
       {u.heldOn.length > 0 && u.playerId && <StatsPanel playerId={u.playerId} stats={stats} />}
-      <NextUp u={u} stats={stats} />
+      {typeof onOff === "string" ? (
+        <p className="mt-2 text-xs text-muted">On/off splits unavailable right now ({onOff}).</p>
+      ) : (
+        onOff && <OnOffTable name={u.playerName} returning={u.returning} table={onOff} open={u.status !== "questionable" || u.returning} />
+      )}
       <details className="mt-1 text-xs text-muted">
         <summary className="cursor-pointer select-none">
           {trail.length > 1 ? `${trail.join(" → ")} · ` : ""}changed {when(u.changedAt, tz).replace(/^(Today|Tomorrow|Yesterday)/, (d) => d.toLowerCase())} · report text

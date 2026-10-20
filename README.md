@@ -4,13 +4,13 @@ A personal tool that watches NBA injury news and tells me which players stand to
 
 It collapses three chores into one view:
 1. **Who is out:** the NBA's official injury report, parsed and grouped by game.
-2. **Who is next up:** players likely to gain (or lose) minutes, from a box-score depth chart and a free language model.
+2. **Who gains:** for each injured player, how every current teammate did in the games he sat versus the games he played (on/off splits).
 3. **How they've been playing:** averages over the last 7, 14 and 30 games next to the season average.
 
 Live app: https://fantasy-basketball-assistant-five.vercel.app (invite-only)<br>
 Product requirements, decisions and acceptance results: **[docs/PRD.md](docs/PRD.md)** · Data-source research: [docs/phase-0-findings.md](docs/phase-0-findings.md)
 
-Everything runs on free tiers with no card on file: Vercel Hobby, Supabase Free, ESPN's public site API, the NBA's injury report PDFs and Gemini's free tier.
+Everything runs on free tiers with no card on file: Vercel Hobby, Supabase Free, ESPN's public site API and the NBA's injury report PDFs.
 
 ---
 
@@ -33,7 +33,6 @@ flowchart LR
   subgraph Sources
     NBA[NBA injury report PDF<br/>every 15 min on game days]
     ESPN[ESPN site API<br/>rosters, scoreboards, box scores]
-    LLM[Gemini free tier<br/>OpenAI-compatible]
   end
 
   subgraph Vercel["Next.js on Vercel"]
@@ -48,18 +47,16 @@ flowchart LR
     Teams[(fantasy_teams<br/>roster_spots<br/>watchlist)]
     Updates[(injury_updates<br/>ingest_state)]
     Logs[(games<br/>game_logs)]
-    NextUp[(next_up)]
-    Fn[[player_stat_windows]]
+    Fn[[player_stat_windows<br/>on_off_splits]]
   end
 
   ESPN --> Cron
   NBA --> Cron
   NBA --> Refresh
-  Cron --> Players & Logs & Updates & NextUp
-  Refresh --> Updates & NextUp
-  LLM --> Cron & Refresh
+  Cron --> Players & Logs & Updates
+  Refresh --> Updates
   Actions --> Teams
-  Players & Teams & Updates & NextUp --> Pages
+  Players & Teams & Updates --> Pages
   Logs --> Fn --> Pages
 ```
 
@@ -67,8 +64,9 @@ flowchart LR
 
 - **Every source sits behind its own adapter** in `src/lib/sources/`, so a source that changes or starts charging can be swapped out.
 - **Ingest is idempotent:** re-running any job upserts the same rows.
-- **The pure logic is unit-tested:** parsing, matching, merging, depth charts, rules and stats are pure functions.
-- **The language model only reorders and explains rule candidates.** It can never add a player.
+- **The pure logic is unit-tested:** parsing, matching, merging, on/off shaping and stats are pure functions.
+- **Numbers, not guesses:** the feed shows measured with/without splits and recent form; it doesn't name winners for you.
+- **Derived numbers are computed when the page loads,** in Postgres, so they always include last night's games and there's nothing to keep in sync.
 - **Pages never wait on the network:** they render saved data and refresh in the background.
 
 ## Workflows
@@ -83,13 +81,13 @@ sequenceDiagram
   participant DB as Supabase
   participant NBA as NBA report
   B->>P: GET /
-  P->>DB: loadFeed() + loadStats()
+  P->>DB: loadFeed() + loadOnOff() + loadStats()
   P-->>B: saved data, grouped by game, in my time zone
   alt last check > 10 min ago (or Refresh pressed)
     B->>R: POST {manual}
     R->>DB: claim the refresh window
     R->>NBA: findLatestReport()
-    R->>DB: upsert injury_updates, then updateNextUp()
+    R->>DB: upsert injury_updates
     R-->>B: result
     B->>P: router.refresh()
   end
@@ -98,14 +96,13 @@ sequenceDiagram
 1. **`FeedPage`** (`src/app/page.tsx`) reads the time zone cookie (`timeZoneFrom`).
 2. It calls **`loadFeed`**, which:
    - loads upcoming `injury_updates`, my teams and the watchlist
-   - groups the updates into team-games with `groupsFromUpdates`
-   - fetches each group's stored `next_up` answer
-   - builds the view with **`buildFeed`**: games ordered by tip-off (`gameStartUtc`), my players pinned, and "your players who gain"
-3. **`loadStats`** fetches recent form for my players and every next-up name in one database call.
-4. **`RefreshControls`** (client) calls `POST /api/refresh`:
+   - builds the view with **`buildFeed`**: games ordered by tip-off (`gameStartUtc`) and my players pinned
+3. **`loadOnOff`** fetches on/off splits for everyone out, doubtful, questionable or returning (see workflow 3). **`tableFor`** shapes each table for its game, and **`myGains`** picks out "your players who gain".
+4. **`loadStats`** fetches recent form for my players and every teammate in a table, 200 players per database call. The form is handed to the browser once (`StatsProvider`) rather than with each table.
+5. **`RefreshControls`** (client) calls `POST /api/refresh`:
    - automatically, when `isStale` says the last check is over 10 minutes old
    - on demand, when I press **Refresh**
-5. Once the refresh finishes, the page reloads its data.
+6. Once the refresh finishes, the page reloads its data.
 
 ### 2. Injury report ingest: `ingestLatestReport` (`src/lib/injuryIngest.ts`)
 
@@ -126,36 +123,21 @@ sequenceDiagram
    - **Flags:** `ongoing` (same status as the previous game) and `is_returning` (from out or doubtful to probable or available).
 7. Upserts the rows and records the report URL and time in `ingest_state`.
 
-### 3. Next-up inference: `updateNextUp` (`src/lib/nextUp/store.ts`)
+### 3. On/off splits: `loadOnOff` (`src/lib/onOff.ts`)
 
-1. Loads upcoming updates and builds **groups** with `groupsFromUpdates`:
-   - one per (team, game)
-   - absent = out or doubtful, excluding G League assignments
-   - returning = `is_returning`
-   - key = date | team | absent ids | returning ids
-2. Skips groups that already have an answer, unless the answer was a rules fallback that can still be retried with the model (fewer than 3 attempts).
-3. For each remaining group (`computeGroup`):
-   - **Depth chart:** loads the roster and the team's recent box scores (current season once it has 3 games), plus recent minutes elsewhere for new arrivals. **`buildDepthChart`** then marks starters by start rate and orders players by minutes.
-   - **Evidence:** **`startsWithAndWithout`** looks at the team's last 20 games, split by whether each absent or returning player played. It counts who started in his place, and computes every teammate's **with/without split**: the per-game change in minutes, shots, usage (FGA + 0.44 FTA + TOV) and points. A split counts once there are 3+ games on each side (`isReliable`); games a teammate wasn't on the box score are left out, so his own injuries don't skew it.
-   - **Using the evidence:** candidates are ranked by their measured gains. Any player with a clear jump (+4 minutes or +2.5 usage) is added at any position. The numbers appear in the reasons, in Gemini's prompt, and in the feed ("Without Flagg (5 g): +6.1 min · +4.2 FGA · +5.0 pts").
-   - **Rules:** **`ruleBeneficiaries`** builds candidates with `candidatesForAbsent` and `candidatesForReturner`, and takes the rule answer: one of each type, up to 3 per player.
-   - **Model:** **`askModel`** sends **`buildPrompt`** (the depth chart plus each candidate's rule note) to Gemini.
-   - **Validation:** **`validateModelCalls`** keeps only listed candidates, fixes invalid types, trims reasons with `oneSentence`, and gives any player the model left uncovered the rule answer.
-4. Upserts into `next_up`.
-5. **Budget:** at most 8 model calls per run, and the model stops at the first 429 (free tier is about 8–10 calls a minute). Later runs upgrade the rule answers.
+For each injured player, how his teammates did in the team's games he sat versus the games he played.
 
-### 3b. Updating next-up calls by hand: `redo` (`src/lib/nextUp/redo.ts`)
-
-Calls are made once per (team, game, absent set), so a call made before last night's box score loaded doesn't see that game. The feed's **Update next-up calls** button redoes those calls within a daily Gemini allowance (`NEXT_UP_REDO_DAILY_CALLS`, default 60):
-
-1. **`planRedo`** works out what an update would involve:
-   - **Out of date:** a call whose team has a finished game after the box scores it used (`next_up.computed_through`) and before the game it's for.
-   - **Cost:** one Gemini call per out-of-date call.
-   - **Runs left:** remaining allowance ÷ cost.
-
-   The button shows all three, and is greyed out when nothing is out of date or the allowance can't cover another run.
-2. **Start:** `reserve_model_calls` reserves the run's calls atomically (refused if they don't fit today). The out-of-date calls are then flagged `needs_recompute` and the first batch of 8 runs.
-3. **Continue:** while the page is open, the button runs the next batch every minute, staying under the free tier's per-minute limit. Flagged calls keep showing their old answer until the model redoes them.
+1. **Who gets a table** (`hasOnOff`): matched players who are out, doubtful or questionable (not G League assignments), or returning. Out, doubtful and returning tables open by default; questionable ones start collapsed.
+2. **The Postgres function `on_off_splits(players, teams, seasons, before)`** does the work in one call per 60 players, over this season and last, using regular-season games that count for stats and were played before the day being viewed:
+   - **His games:** if he played for another team that season, the team's games from his first appearance for it. Otherwise the whole season, so a player hurt since opening night has sat every game.
+   - **Sat or played:** he sat a game unless he has a box-score line with minutes in it.
+   - **Teammates:** current active roster only. Each teammate's averages on each side cover the games he was on the box score (a "did not play" counts as zero), so his own absences don't skew them. Starts are counted, and FG% and FT% are total makes over attempts.
+3. **`toOnOff`** turns the rows into one table per player and season, sorted by minutes gained. Rows with 3+ games on both sides come first, then thin ones (`MIN_GAMES`). Seasons he didn't spend with the team are dropped.
+4. **`pickSeason`** chooses the season the table opens on: this season once he's sat 3+ games in it, otherwise the latest earlier season he sat any. A toggle switches seasons.
+5. **`tableFor`** drops teammates who are out or doubtful for the same game, and tags questionable ones and my players.
+6. **`myGains`** finds "your players who gain": my players with 3+ games each way who gained at least 3 minutes or 3 points a game (`isClearGain`) while an out or doubtful teammate sat.
+7. **`OnOffTable`** (client) shows per-game averages when he sat, with the change from when he played underneath. **`change`** colours clear gains green and drops red, on the same scale as the recent-form table. Tapping a name opens his last 7 / 14 / 30 / season (`StatsTable`).
+8. Never throws: on error, each table says the splits are unavailable.
 
 ### 4. Daily job: `GET /api/cron/daily` (Vercel Cron, 10:00 UTC)
 
@@ -164,7 +146,6 @@ Each step runs even if an earlier one fails, and the response reports each step'
 1. **`syncPlayers`:** `fetchPlayerDirectory` loads all 30 ESPN rosters, `planPlayerSync` plans the upserts and inactive marks (refusing a fetch under 350 players), and the plan is written to `players`.
 2. **`ingestGameLogs(yesterday)`:** `fetchScoreboard` lists completed games and `fetchBoxScore` loads each one. Rows go to `games` and `game_logs`, tagged with season type and `counts_for_stats` (false for All-Star games and the NBA Cup final).
 3. **`ingestLatestReport({ force: true })`**
-4. **`updateNextUp(today)`**, after the box scores, so depth charts include last night.
 
 The job also keeps the free Supabase project from pausing.
 
@@ -173,7 +154,7 @@ The job also keeps the free Supabase project from pausing.
 1. **`currentSeason`** finds the latest regular season with games stored.
 2. Calls the Postgres function **`player_stat_windows(ids, season)`**, 200 players per call. Over games played that count for stats, it returns 7-, 14- and 30-game and season averages, plus make and attempt totals.
 3. **`toPlayerStats`** turns rows into windows, with FG% and FT% as total makes over total attempts.
-4. **`StatsPanel`** shows a one-line summary that opens into the table. **`trend`** colours windows clearly above or below the season average.
+4. **`StatsPanel`** shows a one-line summary that opens into the table (`StatsTable`, also used inside on/off tables). **`trend`** colours windows clearly above or below the season average.
 5. Never throws: on error, the panel says stats are unavailable.
 
 ### 6. Teams, rosters and the watchlist (`src/app/actions.ts`)
@@ -186,12 +167,12 @@ The job also keeps the free Supabase project from pausing.
 
 ### 7. Access and sign-in (invite-only)
 
-- **Admin:** `ADMIN_EMAIL` (falling back to `ALLOWED_EMAIL`), checked by **`isAdmin`** (`src/lib/access.ts`). The admin sees **People** and the update button.
+- **Admin:** `ADMIN_EMAIL` (falling back to `ALLOWED_EMAIL`), checked by **`isAdmin`** (`src/lib/access.ts`). The admin sees **People**.
 - **Inviting:** on **People** (`/people`, admin only), **`inviteUser`** creates the account with `generateLink({ type: "invite" })` and returns a one-time `token_hash` link to copy and send. No email is sent. For someone who already has access, it returns a fresh sign-in link instead.
 - **Signing in:** **`sendMagicLink`** emails a link to existing accounts only (`shouldCreateUser: false`). Unknown addresses get the same "check your inbox" reply. **`/auth/callback`** exchanges a `code` (PKCE) or verifies a `token_hash` (`invite` or `magiclink`), then redirects to `/`.
 - **Without email:** **`npm run login-link`** mints and opens a one-time link for the admin. `-- --email friend@x.com` prints one to send instead. Both avoid the built-in email rate limit.
 - **Sign-ups stay off in Supabase,** so accounts are only ever created by the admin.
-- **What each person has:** their own teams, rosters and watchlist (row-level security), and the shared feed, next-up calls and stats.
+- **What each person has:** their own teams, rosters and watchlist (row-level security), and the shared feed, on/off splits and stats.
 - **`updateSession`** (`src/lib/supabase/proxy.ts`, run by `src/proxy.ts`) refreshes the session cookie on every page request and redirects signed-out visitors to `/login`.
 
 ### 8. Time zone
@@ -216,8 +197,6 @@ The job also keeps the free Supabase project from pausing.
 | `fetchBoxScore` | `espn.ts` | One game's player lines: starter flag, minutes, counting stats, makes and attempts |
 | `fetchGameLogsForDate` | `espn.ts` | Every completed game's box score for a date |
 | `fetchEspnInjuries` | `espn.ts` | ESPN's injury list (secondary feed; used in Phase 0 checks) |
-| `llmConfigFromEnv` | `llm.ts` | Reads `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` |
-| `chatJson` | `llm.ts` | One OpenAI-compatible chat call that must return a JSON object |
 
 ### Core logic: `src/lib/`
 
@@ -238,27 +217,11 @@ The job also keeps the free Supabase project from pausing.
 | `ingestGameLogs` | `gameLogIngest.ts` | Stores a date's games and box-score lines |
 | `assembleDashboard`, `loadDashboard` | `dashboard.ts` | Teams, rosters, watchlist and directory, with every team each player is on |
 | `searchPlayers` | `search.ts` | Autocomplete: word-prefix match, first-name matches first |
-| `buildFeed`, `loadFeed`, `isStale` | `feed.ts` | Feed view model: games by tip-off, my players, opportunities, unmatched names |
+| `buildFeed`, `loadFeed`, `isStale` | `feed.ts` | Feed view model: games by tip-off, my players, unmatched names; who holds whom |
+| `hasOnOff`, `loadOnOff`, `toOnOff`, `pickSeason` | `onOff.ts` | Which updates get a table; splits from `on_off_splits`, sorted, with the opening season |
+| `tableFor`, `myGains`, `isClearGain`, `change` | `onOff.ts` | Per-game table (same-game absences dropped, tags added); my clear gains; colouring |
 | `seasonLabel`, `currentSeason`, `toPlayerStats`, `trend`, `loadStats` | `stats.ts` | Stat windows, percentages, trend colouring, never-throwing loader |
-| `runSpike` | `spike.ts` | Phase 0 source checks (directory, box scores, report, matching, model) |
-
-### Next-up: `src/lib/nextUp/`
-
-| Function | File | What it does |
-| --- | --- | --- |
-| `teamGames` | `depth.ts` | A team's distinct games, newest first |
-| `buildDepthChart` | `depth.ts` | Starters by start rate, minutes order, new-arrival fallback |
-| `startsWithAndWithout` | `depth.ts` | Who started when a player sat, plus every teammate's with/without split (minutes, shots, usage, points) |
-| `isReliable` | `depth.ts` | A split counts with 3+ games each side |
-| `candidatesForAbsent` | `rules.ts` | Fill-in starter, bench at the position, starters at or next to it (ranked by measured gains), plus clear jumps at any position |
-| `candidatesForReturner` | `rules.ts` | Players who started, or whose minutes or usage rose, while he sat |
-| `ruleBeneficiaries` | `rules.ts` | Rule answer per group: merged calls, excluded and questionable handling |
-| `buildPrompt`, `askModel` | `model.ts` | Model prompt with rule notes; call with one JSON retry |
-| `validateModelCalls`, `oneSentence` | `model.ts` | Keeps only valid candidates, falls back to rules, trims reasons |
-| `groupsFromUpdates` | `store.ts` | Team-game groups and their keys from injury updates |
-| `loadGroups`, `loadAnswers` | `store.ts` | Current team-game groups; their stored answers |
-| `updateNextUp` | `store.ts` | Computes new answers, flagged updates and model retries within the model budget |
-| `planRedo`, `redoStatus`, `redo` | `redo.ts` | Out-of-date calls, run cost and runs left; start or continue a manual update |
+| `runSpike` | `spike.ts` | Phase 0 source checks (directory, box scores, report, matching) |
 
 ### Server actions and auth helpers
 
@@ -280,9 +243,11 @@ The job also keeps the free Supabase project from pausing.
 | --- | --- |
 | `AppHeader` | Injuries / Teams (/ People for the admin) navigation and sign-out |
 | `RefreshControls` | Automatic refresh when stale, plus the Refresh button |
-| `NextUpUpdate` | "Update next-up calls" with cost, runs left, greyed-out states and batch progress |
-| `UpdateItem`, `StatusBadge`, `OwnerTags` | One injury update with history, report text, next-up calls and ownership |
-| `StatsPanel` | Recent form: summary line and window table |
+| `UpdateItem` | One injury update with history, report text, ownership and its on/off table |
+| `OnOffTable` | Teammates when he sat vs played: season toggle, show all, tap a name for recent form |
+| `StatusBadge`, `OwnerTags` | Status and "which of my teams" tags |
+| `StatsPanel`, `StatsTable` | Recent form: summary line and window table |
+| `StatsProvider` | Hands the page's recent form to on/off tables once |
 | `PlayerSearch` | Autocomplete add-player box |
 | `PlayerTable` | A roster or the watchlist, with remove buttons and stats rows |
 | `NewTeamForm`, `NewTeamButton`, `TeamSettings` | Create, rename, change format, delete |
@@ -297,8 +262,7 @@ The job also keeps the free Supabase project from pausing.
 | `GET /people` | Admin | Who has access; give access and copy one-time sign-in links |
 | `GET /login` | None | Sign-in form |
 | `GET /auth/callback` | One-time link | Completes sign-in |
-| `POST /api/next-up/redo` | Admin | "Update next-up calls": `{"action": "start"}` reserves the run's Gemini calls and runs the first batch; `{"action": "continue"}` runs the next batch a minute later |
-| `POST /api/refresh` | Session | Ingests the newest report and updates next-up. Body `{"manual": true}` for the 1-minute window |
+| `POST /api/refresh` | Session | Ingests the newest report. Body `{"manual": true}` for the 1-minute window |
 | `GET /api/cron/daily` | `Bearer $CRON_SECRET` | Daily job (Vercel Cron sends the header) |
 | `GET /api/spike` | `Bearer $SPIKE_SECRET` | Phase 0 source checks from the server |
 
@@ -315,8 +279,8 @@ Run them from the project folder; each reads `.env.local`.
 | `npm run login-link` | Opens a one-time admin sign-in link for localhost; add `-- https://<deployment>` for the live app, or `--email friend@x.com` to print a link to send |
 | `npm run sync-players` | Loads or refreshes the player directory now |
 | `npm run backfill-logs -- 2025-10-21 2026-06-20` | Loads box scores for a date range (safe to re-run) |
-| `npm run backtest-nextup` | Replays 20 past starter absences; add `-- --model` to include Gemini, `--season 2027` for another season |
 | `npm run spot-check-stats` | Compares 5 players' season averages with ESPN's official numbers |
+| `npm run spot-check-onoff` | Recomputes on/off splits from raw box scores and compares them with `on_off_splits`; add player names to choose who |
 
 ## Database
 
@@ -329,9 +293,9 @@ Migrations live in `supabase/migrations/`. Run them in order in the Supabase SQL
 | `injury_updates` | refresh, cron | One row per (player, game): status, reason, raw text, history, `ongoing`, `is_returning` |
 | `ingest_state` | refresh, cron | Rate-limit window, last report URL and time, last error |
 | `games`, `game_logs` | cron, backfill | Box scores with season, season type, competition type, `counts_for_stats` |
-| `next_up` | refresh, cron, redo | Answer per (team, game, absent + returning set): calls, source, model attempts, `computed_through`, `needs_recompute` |
-| `model_budget`, `reserve_model_calls()` | redo | Gemini calls used per day and purpose; atomic reservation within the daily allowance |
 | `player_stat_windows(ids, season)` | function | 7-, 14- and 30-game and season averages over games played that count for stats |
+| `on_off_splits(players, teams, seasons, before)` | function | Each current teammate's per-game averages in the games a player sat and played |
+| `next_up`, `model_budget` | (unused) | Left from the old Gemini next-up calls; `0007_on_off.sql` has the commands to drop them |
 
 Signed-in users can read the shared tables; only the secret key writes them. Anonymous access is refused everywhere.
 
@@ -345,14 +309,12 @@ Signed-in users can read the shared tables; only the secret key writes them. Ano
    | --- | --- |
    | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase → Project Settings → API Keys (public) |
    | `SUPABASE_SECRET_KEY` | Same page, Secret keys (`sb_secret_…`, server only) |
-   | `ADMIN_EMAIL` | The admin's address (manages people, spends the manual allowance). `ALLOWED_EMAIL` still works |
+   | `ADMIN_EMAIL` | The admin's address (manages people). `ALLOWED_EMAIL` still works |
    | `CRON_SECRET`, `SPIKE_SECRET` | `openssl rand -hex 32` each |
-   | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | Google AI Studio key, `https://generativelanguage.googleapis.com/v1beta/openai`, e.g. `gemini-3.5-flash-lite` |
-   | `NEXT_UP_REDO_DAILY_CALLS` | Optional; Gemini calls a day for manual next-up updates (default 60) |
 
 4. **Load data:**
    - `npm run sync-players`
-   - `npm run backfill-logs -- <season start> <yesterday>` (last season too, for backtests)
+   - `npm run backfill-logs -- <season start> <yesterday>` (last season too, for on/off tables early in the season)
 5. **Deploy:** import the repo in Vercel and add the same variables. Make the two `NEXT_PUBLIC_` ones *Config* and the rest *Secret*. `vercel.json` schedules the daily job.
 6. **Sign in and lock down:**
    - Create your own account once: run `npm run login-link -- https://<deployment>`, or temporarily allow sign-ups and use the email link.
@@ -361,14 +323,14 @@ Signed-in users can read the shared tables; only the secret key writes them. Ano
 
 ## Testing and checks
 
-- **Unit tests (`npm test`, 54):**
+- **Unit tests (`npm test`, 56):**
   - report parsing against a real PDF (`tests/fixtures/`)
   - name matching, Eastern time and daylight saving, update merging and history
   - feed grouping and time zones
   - player sync, dashboard and search
-  - depth charts, rules and model validation
+  - on/off shaping, season choice, same-game exclusions, my gains and colouring
   - stat windows and trends
-- **Acceptance checks:** `npm run spike` (sources), `npm run backtest-nextup` (next-up 18/20 against a 70% target) and `npm run spot-check-stats` (5 of 5 match ESPN). Results are recorded in [docs/PRD.md](docs/PRD.md).
+- **Acceptance checks:** `npm run spike` (sources), `npm run spot-check-stats` (5 of 5 match ESPN) and `npm run spot-check-onoff` (the database function matches a plain recomputation). Results are recorded in [docs/PRD.md](docs/PRD.md).
 
 ## Project structure
 
@@ -381,10 +343,9 @@ src/
     api/                refresh, cron/daily, spike
   components/           UI components
   lib/
-    sources/            NBA report, ESPN, LLM, HTTP adapters
-    nextUp/             depth chart, rules, model, storage
+    sources/            NBA report, ESPN, HTTP adapters
     supabase/           server, admin and proxy clients
-    *.ts                ingest, feed, stats, dashboard, time, formatting
+    *.ts                ingest, feed, on/off, stats, dashboard, time, formatting
   proxy.ts              session refresh and sign-in gate (Next 16 proxy)
 scripts/                one-off and acceptance scripts
 supabase/migrations/    database schema, in order

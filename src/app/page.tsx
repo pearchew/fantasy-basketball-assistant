@@ -1,15 +1,16 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { AppHeader } from "@/components/AppHeader";
-import { NextUpUpdate } from "@/components/NextUpUpdate";
+import { OwnerTags, StatusBadge } from "@/components/Badges";
 import { RefreshControls } from "@/components/RefreshControls";
+import { StatsProvider } from "@/components/StatsContext";
 import { TimeZoneControl } from "@/components/TimeZoneControl";
-import { OwnerTags, StatusBadge, TYPE_LABEL, UpdateItem } from "@/components/UpdateItem";
+import { UpdateItem } from "@/components/UpdateItem";
 import { isStale, loadFeed, STATUS_ORDER, type Game } from "@/lib/feed";
 import { ago, clock, dayLabel, gameDateLabel, localDate, when } from "@/lib/format";
-import { isAdmin } from "@/lib/access";
-import { redoStatus } from "@/lib/nextUp/redo";
-import { loadStats, type StatsLookup } from "@/lib/stats";
+import { change, hasOnOff, loadOnOff, myGains, subjectKey, tableFor, type Gain, type OnOffTableData, type StatKey } from "@/lib/onOff";
+import type { InjuryStatus } from "@/lib/sources/nbaInjuryReport";
+import { currentSeason, loadStats, type StatsLookup } from "@/lib/stats";
 import { StatsPanel } from "@/components/StatsPanel";
 import { createClient } from "@/lib/supabase/server";
 import { timeZoneFrom } from "@/lib/timezone";
@@ -27,8 +28,43 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 
 const STATUS_WORD: Record<string, string> = { out: "out", doubtful: "doubtful", questionable: "questionable", probable: "probable", available: "available" };
 
+type Tables = Map<number, OnOffTableData | string>;
+
+const GAIN_PARTS: { key: Exclude<StatKey, "fgPct" | "ftPct">; label: string }[] = [
+  { key: "min", label: "min" },
+  { key: "pts", label: "pts" },
+  { key: "reb", label: "reb" },
+  { key: "ast", label: "ast" },
+  { key: "tpm", label: "3PM" },
+];
+
+/** "Without Irving (8 g, 2025-26): +9.4 min · +5.2 pts · …", clear gains green and drops red. */
+function GainLine({ g }: { g: Gain }) {
+  const { without, with: withHim } = g.row;
+  if (!without || !withHim) return null;
+  const last = g.because.playerName.split(" ").slice(1).join(" ") || g.because.playerName;
+  return (
+    <span className="block text-xs text-muted">
+      Without {last} ({without.games} g, {g.season.label}):{" "}
+      {GAIN_PARTS.map((p, i) => {
+        const d = without[p.key] - withHim[p.key];
+        const t = change(p.key, without, withHim);
+        return (
+          <span key={p.key}>
+            {i > 0 && " · "}
+            <span className={t === "up" ? "text-good" : t === "down" ? "text-danger" : ""}>
+              {d >= 0 ? "+" : "−"}
+              {Math.abs(d).toFixed(1)} {p.label}
+            </span>
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 /** One game, closed by default; the summary line says what's inside. */
-function GameDropdown({ game, tz, stats }: { game: Game; tz: string; stats: StatsLookup }) {
+function GameDropdown({ game, tz, stats, tables, gains }: { game: Game; tz: string; stats: StatsLookup; tables: Tables; gains: number }) {
   const [away, home] = game.matchup.split("@");
   // "Available" players are playing: worth seeing inside the game, noise in the summary.
   const counts = STATUS_ORDER.filter((s) => s !== "available" && game.counts[s]).map((s) => `${game.counts[s]} ${STATUS_WORD[s]}`);
@@ -48,9 +84,9 @@ function GameDropdown({ game, tz, stats }: { game: Game; tz: string; stats: Stat
             {game.mine} of yours
           </span>
         )}
-        {game.gains > 0 && (
+        {gains > 0 && (
           <span className="rounded bg-accent-soft px-1.5 py-0.5 text-xs text-accent">
-            {game.gains} of yours gain{game.gains === 1 ? "s" : ""}
+            {gains} of yours gain{gains === 1 ? "s" : ""}
           </span>
         )}
       </summary>
@@ -60,7 +96,7 @@ function GameDropdown({ game, tz, stats }: { game: Game; tz: string; stats: Stat
             <h3 className="pt-3 text-sm font-semibold">{t.name}</h3>
             <ul className="divide-y divide-border">
               {t.updates.map((u) => (
-                <UpdateItem key={u.id} u={u} tz={tz} stats={stats} />
+                <UpdateItem key={u.id} u={u} tz={tz} stats={stats} onOff={tables.get(u.id)} />
               ))}
             </ul>
           </div>
@@ -78,17 +114,53 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
   const zone = timeZoneFrom(await cookies());
   const tz = zone.tz;
   const supabase = await createClient();
-  const [{ feed, state }, { data: auth }] = await Promise.all([
+  const [{ feed, state, heldOn }, { data: auth }, season] = await Promise.all([
     loadFeed(supabase, archiveDate ?? today, { onlyDate: !!archiveDate }),
     supabase.auth.getClaims(),
+    currentSeason(supabase).catch(() => null),
   ]);
+  const updates = feed.games.flatMap((g) => g.teams.flatMap((t) => t.updates));
 
-  // Form for my players and everyone named as next up: one database call.
+  // Teammates' splits for everyone out, doubtful, questionable or returning, from games before this day.
+  const onOff = await loadOnOff(supabase, updates, season, archiveDate ?? today);
+  const statuses = new Map<string, Record<string, InjuryStatus>>();
+  for (const u of updates) {
+    if (!u.playerId) continue;
+    const k = `${u.gameDate}|${u.teamAbbr}`;
+    statuses.set(k, { ...statuses.get(k), [u.playerId]: u.status });
+  }
+  const tables: Tables = new Map();
+  for (const u of updates) {
+    if (!hasOnOff(u)) continue;
+    if (!onOff.ok) {
+      tables.set(u.id, onOff.error);
+      continue;
+    }
+    const data = onOff.bySubject[subjectKey(u.playerId, u.teamAbbr)];
+    if (data) tables.set(u.id, tableFor(data, statuses.get(`${u.gameDate}|${u.teamAbbr}`) ?? {}, heldOn));
+  }
+
+  // My players who did clearly better when an out teammate sat, one entry per player and game.
+  const gains = new Map<string, Gain[]>();
+  const gainsByGame = new Map<string, Set<string>>();
+  for (const u of updates) {
+    const table = tables.get(u.id);
+    if (!table || typeof table === "string") continue;
+    for (const g of myGains(u, table)) {
+      const k = `${u.gameDate}|${g.row.playerId}`;
+      gains.set(k, [...(gains.get(k) ?? []), g]);
+      const gameKey = `${u.gameDate}|${u.matchup}`;
+      gainsByGame.set(gameKey, (gainsByGame.get(gameKey) ?? new Set()).add(g.row.playerId));
+    }
+  }
+  const gainList = [...gains.values()];
+
+  // Form for my players and every teammate in a table: one database call per 200 players.
   const statIds = [
     ...feed.mine.map((u) => u.playerId),
-    ...feed.games.flatMap((g) => g.teams.flatMap((t) => t.updates.flatMap((u) => (u.nextUp ?? []).map((b) => b.player_id)))),
+    ...[...tables.values()].flatMap((t) => (typeof t === "string" ? [] : t.seasons.flatMap((s) => s.rows.map((r) => r.playerId)))),
   ].filter((id): id is string => !!id);
-  const [stats, redo] = await Promise.all([loadStats(supabase, statIds), archiveDate || !isAdmin(auth?.claims?.email) ? null : redoStatus(supabase)]);
+  const stats = await loadStats(supabase, statIds);
 
   // Day headings follow the tip-off date in my time zone.
   const days: { label: string; games: Game[] }[] = [];
@@ -108,11 +180,6 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
         {state.lastSuccessAt && <span>· checked {ago(state.lastSuccessAt)}</span>}
         {!archiveDate && <RefreshControls stale={isStale(state)} />}
       </p>
-      {!archiveDate && redo && feed.games.length > 0 && (
-        <p className="mt-1 text-sm text-muted">
-          <NextUpUpdate status={redo} />
-        </p>
-      )}
       {archiveDate && (
         <p className="mt-2 rounded-lg bg-accent-soft p-3 text-sm">
           Archive: games on {gameDateLabel(archiveDate)} (US Eastern).{" "}
@@ -123,6 +190,7 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
       )}
       {state.lastError && <p className="mt-1 text-sm text-danger">Last refresh failed: {state.lastError}</p>}
 
+      <StatsProvider stats={stats}>
       <main className="mt-4 space-y-4">
         {feed.games.length === 0 && (
           <p className="rounded-xl border border-border bg-surface p-6 text-center text-sm text-muted">
@@ -130,24 +198,29 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
           </p>
         )}
 
-        {feed.opportunities.length > 0 && (
-          <Section title="Your players who gain" hint="Named as next up because a teammate is out.">
+        {gainList.length > 0 && (
+          <Section title="Your players who gain" hint="Clearly better (+3 min or +3 pts a game, 3+ games each way) when an out teammate sat.">
             <ul className="divide-y divide-border">
-              {feed.opportunities.map(({ call, because }) => (
-                <li key={`${because[0].gameDate}|${call.player_id}`} className="py-3 text-sm">
-                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="font-medium">{call.name}</span>
-                    <span className="text-xs text-muted">{TYPE_LABEL[call.type]}</span>
-                    <OwnerTags heldOn={call.heldOn} />
-                    {call.questionable && <StatusBadge status="questionable" />}
-                  </span>
-                  <span className="block text-muted">
-                    {because.map((u) => `${u.playerName} ${u.status}`).join(", ")} · {because[0].matchup.replace("@", " @ ")}
-                  </span>
-                  <span className="block">{call.reason}</span>
-                  <StatsPanel playerId={call.player_id} stats={stats} />
-                </li>
-              ))}
+              {gainList.map((gs) => {
+                const { row } = gs[0];
+                const u = gs[0].because;
+                return (
+                  <li key={`${u.gameDate}|${row.playerId}`} className="py-3 text-sm">
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="font-medium">{row.name}</span>
+                      <OwnerTags heldOn={row.heldOn} />
+                      {row.status && <StatusBadge status={row.status} />}
+                    </span>
+                    <span className="block text-muted">
+                      {gs.map((g) => `${g.because.playerName} ${g.because.status}`).join(", ")} · {u.matchup.replace("@", " @ ")}
+                    </span>
+                    {gs.map((g) => (
+                      <GainLine key={g.because.id} g={g} />
+                    ))}
+                    <StatsPanel playerId={row.playerId} stats={stats} />
+                  </li>
+                );
+              })}
             </ul>
           </Section>
         )}
@@ -156,7 +229,7 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
           <Section title="Your players" hint="On your teams or watchlist.">
             <ul className="divide-y divide-border">
               {feed.mine.map((u) => (
-                <UpdateItem key={u.id} u={u} tz={tz} stats={stats} showGame />
+                <UpdateItem key={u.id} u={u} tz={tz} stats={stats} onOff={tables.get(u.id)} showGame />
               ))}
             </ul>
           </Section>
@@ -169,7 +242,7 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
               {d.games.length} {d.games.length === 1 ? "game" : "games"}
             </h2>
             {d.games.map((g) => (
-              <GameDropdown key={g.key} game={g} tz={tz} stats={stats} />
+              <GameDropdown key={g.key} game={g} tz={tz} stats={stats} tables={tables} gains={gainsByGame.get(g.key)?.size ?? 0} />
             ))}
           </section>
         ))}
@@ -181,6 +254,7 @@ export default async function FeedPage({ searchParams }: PageProps<"/">) {
           </p>
         )}
       </main>
+      </StatsProvider>
 
       <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
         <span>

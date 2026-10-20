@@ -7,7 +7,6 @@ import {
   fetchPlayerDirectory,
   type Player,
 } from "./sources/espn";
-import { chatJson, llmConfigFromEnv } from "./sources/llm";
 import { fetchReport, findLatestReport, parseInjuryReport, type InjuryReport } from "./sources/nbaInjuryReport";
 
 // A completed 2025-26 game day and its 5:00 PM ET report: known-good reference data.
@@ -137,28 +136,6 @@ export async function runSpike(now = new Date()) {
       return {
         ok: injuries.length > 0,
         detail: { count: injuries.length, withId: injuries.filter((i) => i.espnId).length, sample: injuries.slice(0, 3) },
-      };
-    }),
-  );
-
-  checks.push(
-    await check("llm.nextUp", async () => {
-      const config = llmConfigFromEnv();
-      if (!config) return { ok: false, skipped: true, detail: "Set LLM_BASE_URL, LLM_API_KEY and LLM_MODEL to run this check." };
-      const candidates = ["Naji Marshall", "Zaccharie Risacher", "Santi Aldama", "P.J. Washington"];
-      const out = await chatJson<{ beneficiaries: { name: string; type: string; reason: string }[] }>(
-        config,
-        "You rank NBA players who gain fantasy value when a teammate is ruled out. " +
-          "Only choose from the candidate list. Reply with JSON: " +
-          '{"beneficiaries":[{"name":string,"type":"starter_replacement"|"bench_minutes"|"starter_usage","reason":string}]} ' +
-          "with 1 to 3 entries and a one-sentence reason each.",
-        `Dallas Mavericks. Ruled out: Cooper Flagg (F, starter). Candidates: ${candidates.join(", ")}.`,
-      );
-      const names = out.beneficiaries?.map((b) => b.name) ?? [];
-      const invented = names.filter((n) => !candidates.includes(n));
-      return {
-        ok: names.length >= 1 && names.length <= 3 && invented.length === 0,
-        detail: { model: config.model, beneficiaries: out.beneficiaries, invented },
       };
     }),
   );

@@ -12,8 +12,8 @@
     "sync-players": "tsx --env-file-if-exists=.env.local scripts/sync-players.mts",
     "login-link": "tsx --env-file-if-exists=.env.local scripts/login-link.mts",
     "backfill-logs": "tsx --env-file-if-exists=.env.local scripts/backfill-logs.mts",
-    "backtest-nextup": "tsx --env-file-if-exists=.env.local scripts/backtest-nextup.mts",
-    "spot-check-stats": "tsx --env-file-if-exists=.env.local scripts/spot-check-stats.mts"
+    "spot-check-stats": "tsx --env-file-if-exists=.env.local scripts/spot-check-stats.mts",
+    "spot-check-onoff": "tsx --env-file-if-exists=.env.local scripts/spot-check-onoff.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
