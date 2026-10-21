@@ -2,12 +2,26 @@ import Link from "next/link";
 import { AppHeader } from "@/components/AppHeader";
 import { OwnerTags } from "@/components/Badges";
 import { heldByMap, loadDashboard } from "@/lib/dashboard";
-import { DEFAULT_THRESHOLD, loadMonitoring, pickFlags, THRESHOLDS, type FormFlag } from "@/lib/form";
+import { DEFAULT_THRESHOLD, leaders, loadMonitoring, pickFlags, THRESHOLDS, type Drivers, type FormFlag } from "@/lib/form";
 import { gameDateLabel } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { addDays } from "@/lib/time";
 
 const signed = (z: number) => (z > 0 ? "+" : "") + z.toFixed(1);
+
+function LedBy({ drivers, side }: { drivers: Drivers; side: FormFlag["side"] }) {
+  const top = leaders(drivers, side);
+  if (!top.length) return <span className="text-muted">–</span>;
+  return (
+    <span className="flex flex-col text-xs">
+      {top.map((d) => (
+        <span key={d.cat} className="whitespace-nowrap">
+          {d.cat} <span className="text-muted">{signed(d.delta)}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
 
 function FlagTable({ flags, heldBy, emptyText }: { flags: FormFlag[]; heldBy: Record<string, string[]>; emptyText: string }) {
   if (!flags.length) return <p className="py-6 text-center text-sm text-muted">{emptyText}</p>;
@@ -20,8 +34,14 @@ function FlagTable({ flags, heldBy, emptyText }: { flags: FormFlag[]; heldBy: Re
             <th className="py-2 pr-3 text-right font-medium" title="Last 3 games vs the 10 before them, in his own standard deviations">
               vs prev 10
             </th>
+            <th className="py-2 pr-3 font-medium" title="Categories that moved most: change in z-score per game">
+              Led by
+            </th>
             <th className="py-2 pr-3 text-right font-medium" title="Last 3 games vs his baseline, in his own standard deviations">
               vs season
+            </th>
+            <th className="py-2 pr-3 font-medium" title="Categories that moved most: change in z-score per game">
+              Led by
             </th>
             <th className="py-2 text-right font-medium" title="Minutes per game: last 3 (baseline)">
               Min
@@ -43,6 +63,9 @@ function FlagTable({ flags, heldBy, emptyText }: { flags: FormFlag[]; heldBy: Re
                   )}
                 </td>
                 <td className={`py-2 pr-3 text-right ${tone}`}>{signed(f.zPrev10)}</td>
+                <td className="py-2 pr-3">
+                  <LedBy drivers={f.driversPrev10} side={f.side} />
+                </td>
                 <td className={`py-2 pr-3 text-right ${tone}`}>
                   {signed(f.zBaseline)}
                   {f.baseline === "last_season" && (
@@ -50,6 +73,9 @@ function FlagTable({ flags, heldBy, emptyText }: { flags: FormFlag[]; heldBy: Re
                       LY
                     </span>
                   )}
+                </td>
+                <td className="py-2 pr-3">
+                  <LedBy drivers={f.driversBaseline} side={f.side} />
                 </td>
                 <td className="py-2 text-right whitespace-nowrap">
                   {Math.round(f.minLast3)} <span className="text-xs text-muted">({Math.round(f.minBaseline)})</span>
@@ -107,7 +133,8 @@ export default async function MonitoringPage({ searchParams }: PageProps<"/monit
           ? `Through games on ${gameDateLabel(addDays(monitoring.date, -1))}. `
           : ""}
         Last 3 games compared with the 10 before them and with the season so far, in each player&apos;s own standard deviations
-        of a 9-category value. Both gaps must clear the threshold. Top 50 players left out.
+        of a 9-category value. Both gaps must clear the threshold. Top 50 players left out. &ldquo;Led by&rdquo; names the
+        categories that moved most, as the change in that category&apos;s z-score per game (turnovers: + means fewer).
       </p>
       {!monitoring.ok && <p className="mt-2 text-sm text-danger">Couldn&apos;t load the snapshot: {monitoring.error}</p>}
 

@@ -18,6 +18,10 @@ create table public.form_snapshots (
   value_baseline numeric not null,
   min_last3      numeric not null,
   min_baseline   numeric not null,
+  -- What drove each gap: category -> change in that category's z-score per game (last 3 minus
+  -- the comparison window). Turnovers are reversed, so + is better everywhere; the nine sum to the value change.
+  drivers_prev10   jsonb not null,
+  drivers_baseline jsonb not null,
   last_game      date not null,
   primary key (snapshot_date, player_id)
 );
@@ -31,7 +35,7 @@ create or replace function public.form_flags(p_date date, p_season int, p_min_sd
 returns table (
   player_id text, player_name text, team_abbr text, side text, baseline text, baseline_rank int,
   z_prev10 numeric, z_baseline numeric, value_last3 numeric, value_prev10 numeric, value_baseline numeric,
-  min_last3 numeric, min_baseline numeric, last_game date
+  min_last3 numeric, min_baseline numeric, drivers_prev10 jsonb, drivers_baseline jsonb, last_game date
 )
 language sql
 stable
@@ -63,13 +67,18 @@ as $$
            avg(tov) m_tov, stddev(tov) s_tov, avg(fgi) m_fgi, stddev(fgi) s_fgi, avg(fti) m_fti, stddev(fti) s_fti
     from regulars
   ),
-  -- Each game's value: the sum of 9-category z-scores, turnovers inverted, percentages by attempts.
-  valued as (
-    select p.*, (
-        (pts - m_pts) / s_pts + (reb - m_reb) / s_reb + (ast - m_ast) / s_ast + (stl - m_stl) / s_stl
-      + (blk - m_blk) / s_blk + (tpm - m_tpm) / s_tpm - (tov - m_tov) / s_tov
-      + ((fgm - fga * lg.fg) - m_fgi) / s_fgi + ((ftm - fta * lg.ft) - m_fti) / s_fti) as v
+  -- Each game's category z-scores (turnovers reversed, percentages by attempts) and their sum, its value.
+  zs as (
+    select p.*,
+           (pts - m_pts) / s_pts as z_pts, (reb - m_reb) / s_reb as z_reb, (ast - m_ast) / s_ast as z_ast,
+           (stl - m_stl) / s_stl as z_stl, (blk - m_blk) / s_blk as z_blk, (tpm - m_tpm) / s_tpm as z_tpm,
+           -(tov - m_tov) / s_tov as z_tov,
+           ((fgm - fga * lg.fg) - m_fgi) / s_fgi as z_fg, ((ftm - fta * lg.ft) - m_fti) / s_fti as z_ft
     from played p, sc, lg
+  ),
+  valued as (
+    select z.*, z.z_pts + z.z_reb + z.z_ast + z.z_stl + z.z_blk + z.z_tpm + z.z_tov + z.z_fg + z.z_ft as v
+    from zs z
   ),
   per_player as (
     select v.player_id,
@@ -112,15 +121,40 @@ as $$
     from ranked r
     -- 3 recent games this season at 15+ minutes, one in the last week, 5+ before them, outside the top 50.
     where r.n_recent = 3 and r.n_prev >= 5 and r.min_last3 >= 15 and r.last_game >= p_date - 7 and r.baseline_rank > 50
+  ),
+  flagged as (
+    select s.* from scored s
+    where (s.zp >= p_min_sd and s.zb >= p_min_sd) or (s.zp <= -p_min_sd and s.zb <= -p_min_sd)
+  ),
+  -- Per category: last 3 minus the previous 10, and minus the baseline.
+  by_cat as (
+    select f.player_id, c.cat,
+           avg(c.z) filter (where v.rn <= 3) - avg(c.z) filter (where v.rn between 4 and 13) as d_prev,
+           avg(c.z) filter (where v.rn <= 3) - case when f.baseline = 'season'
+             then avg(c.z) filter (where v.rn > 3 and v.season = p_season)
+             else avg(c.z) filter (where v.season = p_season - 1) end as d_base
+    from flagged f
+    join valued v on v.player_id = f.player_id
+    cross join lateral (values ('PTS', v.z_pts), ('REB', v.z_reb), ('AST', v.z_ast), ('STL', v.z_stl), ('BLK', v.z_blk),
+                               ('3PM', v.z_tpm), ('TO', v.z_tov), ('FG%', v.z_fg), ('FT%', v.z_ft)) as c (cat, z)
+    group by f.player_id, f.baseline, c.cat
+  ),
+  drivers as (
+    select b.player_id,
+           jsonb_object_agg(b.cat, round(b.d_prev, 2)) as d_prev,
+           jsonb_object_agg(b.cat, round(b.d_base, 2)) as d_base
+    from by_cat b
+    group by b.player_id
   )
   select s.player_id, s.player_name, s.team_abbr,
          case when s.zp > 0 then 'riser' else 'dropper' end as side,
          s.baseline, s.baseline_rank,
          round(s.zp, 2) as z_prev10, round(s.zb, 2) as z_baseline,
          round(s.value_last3, 2) as value_last3, round(s.value_prev10, 2) as value_prev10, round(s.value_baseline, 2) as value_baseline,
-         round(s.min_last3, 1) as min_last3, round(s.min_baseline, 1) as min_baseline, s.last_game
-  from scored s
-  where (s.zp >= p_min_sd and s.zb >= p_min_sd) or (s.zp <= -p_min_sd and s.zb <= -p_min_sd)
+         round(s.min_last3, 1) as min_last3, round(s.min_baseline, 1) as min_baseline,
+         d.d_prev as drivers_prev10, d.d_base as drivers_baseline, s.last_game
+  from flagged s
+  join drivers d on d.player_id = s.player_id
 $$;
 
 -- Replaces one day's snapshot. Called by the daily job with the secret key.
@@ -136,7 +170,7 @@ begin
   delete from public.form_snapshots where snapshot_date = p_date;
   insert into public.form_snapshots (
     snapshot_date, player_id, player_name, team_abbr, side, baseline, baseline_rank, z_prev10, z_baseline,
-    value_last3, value_prev10, value_baseline, min_last3, min_baseline, last_game
+    value_last3, value_prev10, value_baseline, min_last3, min_baseline, drivers_prev10, drivers_baseline, last_game
   )
   select p_date, f.* from public.form_flags(p_date, p_season, 0.5) f;
   get diagnostics n = row_count;

@@ -20,7 +20,12 @@ export type FormFlag = {
   valueBaseline: number;
   minLast3: number;
   minBaseline: number;
+  /** Category -> change in its z-score per game, last 3 minus the window. + is better (turnovers reversed). */
+  driversPrev10: Drivers;
+  driversBaseline: Drivers;
 };
+
+export type Drivers = Record<string, number>;
 
 export type FormRow = {
   player_id: string;
@@ -36,6 +41,8 @@ export type FormRow = {
   value_baseline: number | string;
   min_last3: number | string;
   min_baseline: number | string;
+  drivers_prev10: Drivers;
+  drivers_baseline: Drivers;
 };
 
 export function toFormFlag(r: FormRow): FormFlag {
@@ -53,7 +60,19 @@ export function toFormFlag(r: FormRow): FormFlag {
     valueBaseline: Number(r.value_baseline),
     minLast3: Number(r.min_last3),
     minBaseline: Number(r.min_baseline),
+    driversPrev10: r.drivers_prev10,
+    driversBaseline: r.drivers_baseline,
   };
+}
+
+/** The categories that moved most in the flag's direction, biggest first. */
+export function leaders(drivers: Drivers, side: FormFlag["side"], count = 2): { cat: string; delta: number }[] {
+  const sign = side === "riser" ? 1 : -1;
+  return Object.entries(drivers)
+    .map(([cat, delta]) => ({ cat, delta: Number(delta) }))
+    .filter((d) => d.delta * sign > 0)
+    .sort((a, b) => (b.delta - a.delta) * sign)
+    .slice(0, count);
 }
 
 /** The smaller of the two gaps: how strongly a player clears the threshold. */
