@@ -2,7 +2,17 @@ import Link from "next/link";
 import { AppHeader } from "@/components/AppHeader";
 import { OwnerTags } from "@/components/Badges";
 import { heldByMap, loadDashboard } from "@/lib/dashboard";
-import { DEFAULT_THRESHOLD, leaders, loadMonitoring, pickFlags, THRESHOLDS, type Drivers, type FormFlag } from "@/lib/form";
+import {
+  CATEGORY_LABELS,
+  DEFAULT_THRESHOLD,
+  leaders,
+  loadMonitoring,
+  pickFlags,
+  THRESHOLDS,
+  type Categories,
+  type Drivers,
+  type FormFlag,
+} from "@/lib/form";
 import { gameDateLabel } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { addDays } from "@/lib/time";
@@ -90,24 +100,26 @@ function FlagTable({ flags, heldBy, emptyText }: { flags: FormFlag[]; heldBy: Re
 }
 
 export default async function MonitoringPage({ searchParams }: PageProps<"/monitoring">) {
-  const { sd, show } = await searchParams;
+  const { sd, show, cats } = await searchParams;
   const threshold = THRESHOLDS.find((t) => String(t) === sd) ?? DEFAULT_THRESHOLD;
   const everyone = show === "all";
+  const categories: Categories = cats === "7" ? "7cat" : "9cat";
 
   const supabase = await createClient();
   const [monitoring, dashboard, { data: auth }] = await Promise.all([
-    loadMonitoring(supabase),
+    loadMonitoring(supabase, categories),
     loadDashboard(supabase),
     supabase.auth.getClaims(),
   ]);
   const heldBy = heldByMap(dashboard);
   const { risers, droppers } = monitoring.ok ? pickFlags(monitoring.flags, threshold, everyone) : { risers: [], droppers: [] };
 
-  const href = (next: { sd?: number; all?: boolean }) => {
+  const href = (next: { sd?: number; all?: boolean; categories?: Categories }) => {
     const params = new URLSearchParams();
     const t = next.sd ?? threshold;
     if (t !== DEFAULT_THRESHOLD) params.set("sd", String(t));
     if (next.all ?? everyone) params.set("show", "all");
+    if ((next.categories ?? categories) === "7cat") params.set("cats", "7");
     const q = params.toString();
     return q ? `/monitoring?${q}` : "/monitoring";
   };
@@ -133,7 +145,7 @@ export default async function MonitoringPage({ searchParams }: PageProps<"/monit
           ? `Through games on ${gameDateLabel(addDays(monitoring.date, -1))}. `
           : ""}
         Last 3 games compared with the 10 before them and with the season so far, in each player&apos;s own standard deviations
-        of a 9-category value. Both gaps must clear the threshold. Top 50 players left out. &ldquo;Led by&rdquo; names the
+        of a per-game value: the sum of category z-scores, with or without FG% and FT%. Both gaps must clear the threshold. Top 50 players left out. &ldquo;Led by&rdquo; names the
         categories that moved most, as the change in that category&apos;s z-score per game (turnovers: + means fewer).
       </p>
       {!monitoring.ok && <p className="mt-2 text-sm text-danger">Couldn&apos;t load the snapshot: {monitoring.error}</p>}
@@ -143,6 +155,8 @@ export default async function MonitoringPage({ searchParams }: PageProps<"/monit
         <span className="mx-2 h-5 w-px bg-border" aria-hidden />
         {pill("Rosterable", href({ all: false }), !everyone)}
         {pill("Everyone", href({ all: true }), everyone)}
+        <span className="mx-2 h-5 w-px bg-border" aria-hidden />
+        {(["9cat", "7cat"] as const).map((c) => pill(CATEGORY_LABELS[c], href({ categories: c }), c === categories))}
       </nav>
 
       <main className="mt-4 grid gap-4 md:grid-cols-2">

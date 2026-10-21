@@ -2,9 +2,11 @@
 -- 3 games are compared with the 10 games before them and with his baseline (this season's
 -- earlier games, or last season's until he has 10 this season), in his own game-to-game
 -- standard deviations. Players flagged at 0.5 s.d. or more are stored; the page filters further.
+-- Stored twice: valued on all 9 categories, and on the 7 counting ones (no FG% or FT%).
 
 create table public.form_snapshots (
   snapshot_date  date not null,           -- US Eastern; counts games before this date
+  categories     text not null check (categories in ('9cat', '7cat')),
   player_id      text not null,
   player_name    text not null,
   team_abbr      text not null,
@@ -23,7 +25,7 @@ create table public.form_snapshots (
   drivers_prev10   jsonb not null,
   drivers_baseline jsonb not null,
   last_game      date not null,
-  primary key (snapshot_date, player_id)
+  primary key (snapshot_date, categories, player_id)
 );
 
 alter table public.form_snapshots enable row level security;
@@ -31,7 +33,7 @@ create policy "signed-in users read form snapshots" on public.form_snapshots for
 grant select on public.form_snapshots to authenticated;
 grant all on public.form_snapshots to service_role;
 
-create or replace function public.form_flags(p_date date, p_season int, p_min_sd numeric)
+create or replace function public.form_flags(p_date date, p_season int, p_min_sd numeric, p_categories text)
 returns table (
   player_id text, player_name text, team_abbr text, side text, baseline text, baseline_rank int,
   z_prev10 numeric, z_baseline numeric, value_last3 numeric, value_prev10 numeric, value_baseline numeric,
@@ -67,7 +69,8 @@ as $$
            avg(tov) m_tov, stddev(tov) s_tov, avg(fgi) m_fgi, stddev(fgi) s_fgi, avg(fti) m_fti, stddev(fti) s_fti
     from regulars
   ),
-  -- Each game's category z-scores (turnovers reversed, percentages by attempts) and their sum, its value.
+  -- Each game's category z-scores (turnovers reversed, percentages by attempts) and their sum, its
+  -- value; without FG% and FT% for '7cat'. The scale above keeps all 9 either way.
   zs as (
     select p.*,
            (pts - m_pts) / s_pts as z_pts, (reb - m_reb) / s_reb as z_reb, (ast - m_ast) / s_ast as z_ast,
@@ -77,7 +80,8 @@ as $$
     from played p, sc, lg
   ),
   valued as (
-    select z.*, z.z_pts + z.z_reb + z.z_ast + z.z_stl + z.z_blk + z.z_tpm + z.z_tov + z.z_fg + z.z_ft as v
+    select z.*, z.z_pts + z.z_reb + z.z_ast + z.z_stl + z.z_blk + z.z_tpm + z.z_tov
+             + case when p_categories = '9cat' then z.z_fg + z.z_ft else 0 end as v
     from zs z
   ),
   per_player as (
@@ -137,6 +141,7 @@ as $$
     join valued v on v.player_id = f.player_id
     cross join lateral (values ('PTS', v.z_pts), ('REB', v.z_reb), ('AST', v.z_ast), ('STL', v.z_stl), ('BLK', v.z_blk),
                                ('3PM', v.z_tpm), ('TO', v.z_tov), ('FG%', v.z_fg), ('FT%', v.z_ft)) as c (cat, z)
+    where p_categories = '9cat' or c.cat not in ('FG%', 'FT%')
     group by f.player_id, f.baseline, c.cat
   ),
   drivers as (
@@ -157,7 +162,7 @@ as $$
   join drivers d on d.player_id = s.player_id
 $$;
 
--- Replaces one day's snapshot. Called by the daily job with the secret key.
+-- Replaces one day's snapshot, both valuations. Called by the daily job with the secret key.
 create or replace function public.refresh_form_snapshot(p_date date, p_season int)
 returns int
 language plpgsql
@@ -169,10 +174,12 @@ declare
 begin
   delete from public.form_snapshots where snapshot_date = p_date;
   insert into public.form_snapshots (
-    snapshot_date, player_id, player_name, team_abbr, side, baseline, baseline_rank, z_prev10, z_baseline,
+    snapshot_date, categories, player_id, player_name, team_abbr, side, baseline, baseline_rank, z_prev10, z_baseline,
     value_last3, value_prev10, value_baseline, min_last3, min_baseline, drivers_prev10, drivers_baseline, last_game
   )
-  select p_date, f.* from public.form_flags(p_date, p_season, 0.5) f;
+  select p_date, c.categories, f.*
+  from (values ('9cat'), ('7cat')) as c (categories)
+  cross join lateral public.form_flags(p_date, p_season, 0.5, c.categories) f;
   get diagnostics n = row_count;
   return n;
 end

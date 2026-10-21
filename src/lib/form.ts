@@ -6,6 +6,10 @@ import { currentSeason } from "./stats";
 export const THRESHOLDS = [0.5, 1] as const;
 export const DEFAULT_THRESHOLD = 1;
 
+/** How a game is valued: all 9 categories, or the 7 counting ones (no FG% or FT%). */
+export type Categories = "9cat" | "7cat";
+export const CATEGORY_LABELS: Record<Categories, string> = { "9cat": "All 9 categories", "7cat": "No FG% / FT%" };
+
 export type FormFlag = {
   playerId: string;
   name: string;
@@ -94,14 +98,14 @@ export function pickFlags(flags: FormFlag[], threshold: number, everyone: boolea
 
 export type MonitoringLookup = { ok: true; date: string | null; flags: FormFlag[] } | { ok: false; error: string };
 
-/** The latest snapshot's flags. Never throws. */
-export async function loadMonitoring(supabase: SupabaseClient): Promise<MonitoringLookup> {
+/** The latest snapshot's flags under one valuation. Never throws. */
+export async function loadMonitoring(supabase: SupabaseClient, categories: Categories): Promise<MonitoringLookup> {
   try {
     const latest = await supabase.from("form_snapshots").select("snapshot_date").order("snapshot_date", { ascending: false }).limit(1);
     if (latest.error) throw latest.error;
     const date: string | undefined = latest.data[0]?.snapshot_date;
     if (!date) return { ok: true, date: null, flags: [] };
-    const { data, error } = await supabase.from("form_snapshots").select("*").eq("snapshot_date", date);
+    const { data, error } = await supabase.from("form_snapshots").select("*").eq("snapshot_date", date).eq("categories", categories);
     if (error) throw error;
     return { ok: true, date, flags: (data as FormRow[]).map(toFormFlag) };
   } catch (e) {
@@ -109,7 +113,7 @@ export async function loadMonitoring(supabase: SupabaseClient): Promise<Monitori
   }
 }
 
-/** Stores the snapshot for games before `isoDate` (US Eastern). Run after the day's box scores load. */
+/** Stores the snapshot, both valuations, for games before `isoDate` (US Eastern). Run after the day's box scores load. */
 export async function snapshotForm(admin: SupabaseClient, isoDate: string) {
   const season = await currentSeason(admin);
   if (season === null) return { date: isoDate, flagged: 0 };

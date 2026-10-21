@@ -171,6 +171,7 @@ Before, that meant refreshing a news feed, working out who absorbs the minutes, 
 - **[built]** "Rosterable" (the default view) keeps risers whose last 3 games reached a value of 0 and droppers who were at 0 or better before the slump. "Everyone" shows the raw lists.
 - **[built]** Computed once a day by the daily job (`refresh_form_snapshot`, right after the box scores load) and stored in `form_snapshots`, so the page reads one stored snapshot and runs no analysis.
 - Players on my teams or watchlist show where I hold them.
+- **[built]** Two valuations, stored side by side and switched on the tab: all 9 categories (default), or the 7 counting ones without FG% and FT%. Backtest: equally reliable (1.0 s.d. risers kept it up 78% of the time without percentages, 79% with), but the names differ a lot: about half the risers and four in five droppers appear on only one list.
 - **[built]** "Led by" after each gap names the two categories that moved most in the flag's direction, as the change in that category's z-score per game. The nine categories add up to the value change.
 
 **Acceptance criteria**
