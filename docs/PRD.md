@@ -15,6 +15,7 @@ Live app: https://fantasy-basketball-assistant-five.vercel.app · Code: `pearche
 | 2. Feed | Done | 142 of 142 rows on a real game-day report parsed and matched, or listed for review. Live game day pending (season starts about Oct 20). |
 | 3. On/off splits | Done (v4) | The database function matches a plain recomputation from box scores for 7 players across 2 seasons; about 0.3 s for a full day's injured players. Replaced the v3 next-up calls (backtest 90%), which named players but added little the numbers didn't show. |
 | 4. Stats | Done | 5 of 5 players match ESPN's official 2025-26 season averages. |
+| 5. Monitoring | Done | Daily snapshot matches the standalone backtest exactly; 79% of 1.0 s.d. risers kept it up over their next 5 games. |
 
 ## Summary
 
@@ -157,6 +158,26 @@ Before, that meant refreshing a news feed, working out who absorbs the minutes, 
 | --- | --- |
 | Stats reflect the previous night's games by the next morning | The daily job at 10:00 UTC loads yesterday's box scores; verified on the live site |
 | Averages match a reference for 5 spot-checked players | `npm run spot-check-stats`: Flagg, Gilgeous-Alexander, Jokić, Brunson and Marshall all match ESPN's official 2025-26 averages (Brunson's 74 games and 26.0 points independently confirmed). Minutes can differ by under 0.1 because box scores give whole minutes |
+
+## Feature 5: Monitoring (risers and droppers)
+
+**Requirements (as built)**
+
+- A Monitoring tab with two lists side by side: risers (playing well above their norm) and droppers (well below it).
+- **[built]** Each game is scored as one value: the sum of 9-category z-scores (points, rebounds, assists, steals, blocks, threes, turnovers reversed, FG% and FT% weighted by attempts), scaled against players averaging 20+ minutes. 0 is an average rotation player.
+- A player is flagged when his last 3 games beat (or trail) both the 10 games before them and his baseline by the threshold, measured in his own game-to-game standard deviations. The page offers 0.5 and 1.0 s.d.; 1.0 is the default.
+- **[built]** Baseline: this season's games before the last 3, or last season's until he has 10 this season (marked "LY"). The previous 10 may reach back into last season.
+- Left out: the top 50 by baseline value (a stand-in for "drafted in every league"), and anyone without 3 games this season at 15+ minutes, a game in the last week and 5+ games before the last 3.
+- **[built]** "Rosterable" (the default view) keeps risers whose last 3 games reached a value of 0 and droppers who were at 0 or better before the slump. "Everyone" shows the raw lists.
+- **[built]** Computed once a day by the daily job (`refresh_form_snapshot`, right after the box scores load) and stored in `form_snapshots`, so the page reads one stored snapshot and runs no analysis.
+- Players on my teams or watchlist show where I hold them.
+
+**Acceptance criteria**
+
+| Criterion | Result |
+| --- | --- |
+| The stored function matches the backtest | Jan 12, 2026: 58 risers and 29 droppers at 0.5 s.d., 23 and 5 at 1.0, identical to the standalone backtest |
+| A flag says something about the next games | Weekly snapshots Dec 1, 2025 to Mar 30, 2026: 79% of 1.0 s.d. risers beat their season average over their next 5 games (65% at 0.3, 53% for every eligible player). Droppers are weaker: 59% stayed below at 1.0 |
 
 ## Data sources
 

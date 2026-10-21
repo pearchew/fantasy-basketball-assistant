@@ -5,6 +5,7 @@ import { isAdmin } from "@/lib/access";
 const LINKS = [
   { key: "feed", href: "/", label: "Injuries", adminOnly: false },
   { key: "teams", href: "/teams", label: "Teams", adminOnly: false },
+  { key: "monitoring", href: "/monitoring", label: "Monitoring", adminOnly: false },
   { key: "people", href: "/people", label: "People", adminOnly: true },
 ] as const;
 
@@ -12,7 +13,7 @@ export function AppHeader({ active, email }: { active: (typeof LINKS)[number]["k
   const admin = isAdmin(email);
   return (
     <header className="flex items-center justify-between gap-3">
-      <nav className="flex items-center gap-1" aria-label="Main">
+      <nav className="flex flex-wrap items-center gap-1" aria-label="Main">
         {LINKS.filter((l) => admin || !l.adminOnly).map((l) => (
           <Link
             key={l.key}

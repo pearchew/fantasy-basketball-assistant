@@ -2,17 +2,10 @@ import Link from "next/link";
 import { PlayerSearch } from "@/components/PlayerSearch";
 import { PlayerTable } from "@/components/PlayerTable";
 import { NewTeamButton, NewTeamForm, TeamSettings } from "@/components/TeamForms";
-import { loadDashboard, type Dashboard } from "@/lib/dashboard";
+import { heldByMap, loadDashboard } from "@/lib/dashboard";
 import { loadStats } from "@/lib/stats";
 import { createClient } from "@/lib/supabase/server";
 import { AppHeader } from "@/components/AppHeader";
-
-function heldByMap(d: Dashboard): Record<string, string[]> {
-  const held: Record<string, string[]> = {};
-  for (const t of d.teams) for (const p of d.rosters[t.id]) (held[p.espnId] ??= []).push(t.name);
-  for (const p of d.watchlist) (held[p.espnId] ??= []).push("Watchlist");
-  return held;
-}
 
 export default async function TeamsPage({ searchParams }: PageProps<"/teams">) {
   const { view: rawView } = await searchParams;
