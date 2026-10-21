@@ -103,7 +103,7 @@ export default async function MonitoringPage({ searchParams }: PageProps<"/monit
   const { sd, show, cats } = await searchParams;
   const threshold = THRESHOLDS.find((t) => String(t) === sd) ?? DEFAULT_THRESHOLD;
   const everyone = show === "all";
-  const categories: Categories = cats === "7" ? "7cat" : "9cat";
+  const categories: Categories = cats === "9" ? "9cat" : "7cat";
 
   const supabase = await createClient();
   const [monitoring, dashboard, { data: auth }] = await Promise.all([
@@ -119,7 +119,7 @@ export default async function MonitoringPage({ searchParams }: PageProps<"/monit
     const t = next.sd ?? threshold;
     if (t !== DEFAULT_THRESHOLD) params.set("sd", String(t));
     if (next.all ?? everyone) params.set("show", "all");
-    if ((next.categories ?? categories) === "7cat") params.set("cats", "7");
+    if ((next.categories ?? categories) === "9cat") params.set("cats", "9");
     const q = params.toString();
     return q ? `/monitoring?${q}` : "/monitoring";
   };
@@ -156,7 +156,7 @@ export default async function MonitoringPage({ searchParams }: PageProps<"/monit
         {pill("Rosterable", href({ all: false }), !everyone)}
         {pill("Everyone", href({ all: true }), everyone)}
         <span className="mx-2 h-5 w-px bg-border" aria-hidden />
-        {(["9cat", "7cat"] as const).map((c) => pill(CATEGORY_LABELS[c], href({ categories: c }), c === categories))}
+        {(["7cat", "9cat"] as const).map((c) => pill(CATEGORY_LABELS[c], href({ categories: c }), c === categories))}
       </nav>
 
       <main className="mt-4 grid gap-4 md:grid-cols-2">
