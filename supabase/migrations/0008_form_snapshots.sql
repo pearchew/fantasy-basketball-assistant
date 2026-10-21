@@ -15,7 +15,7 @@ create table public.form_snapshots (
   baseline_rank  int not null,            -- by baseline value among all players with a baseline
   z_prev10       numeric not null,        -- (last 3 - previous 10) / player's s.d.
   z_baseline     numeric not null,        -- (last 3 - baseline) / player's s.d.
-  value_last3    numeric not null,        -- 9-cat z-score total per game
+  value_last3    numeric not null,        -- category z-score total per game, under `categories`
   value_prev10   numeric not null,
   value_baseline numeric not null,
   min_last3      numeric not null,

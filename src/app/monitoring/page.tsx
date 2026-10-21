@@ -114,6 +114,12 @@ export default async function MonitoringPage({ searchParams }: PageProps<"/monit
   const heldBy = heldByMap(dashboard);
   const { risers, droppers } = monitoring.ok ? pickFlags(monitoring.flags, threshold, everyone) : { risers: [], droppers: [] };
 
+  // Nothing is stored until someone is flagged, which takes 3 games this season.
+  const emptyText =
+    monitoring.ok && !monitoring.date
+      ? "Nobody flagged yet. Players need 3 games this season; the lists update each morning."
+      : "Nobody at this threshold.";
+
   const href = (next: { sd?: number; all?: boolean; categories?: Categories }) => {
     const params = new URLSearchParams();
     const t = next.sd ?? threshold;
@@ -165,14 +171,14 @@ export default async function MonitoringPage({ searchParams }: PageProps<"/monit
             Risers <span className="font-normal text-muted">{risers.length}</span>
           </h2>
           <p className="text-sm text-muted">{everyone ? "Strongest first." : "Last 3 games at an average rotation player's level or better."}</p>
-          <FlagTable flags={risers} heldBy={heldBy} emptyText={monitoring.ok && !monitoring.date ? "No snapshot yet. It's made each morning after the box scores load." : "Nobody at this threshold."} />
+          <FlagTable flags={risers} heldBy={heldBy} emptyText={emptyText} />
         </section>
         <section className="rounded-xl border border-border bg-surface px-4 pt-3 pb-1">
           <h2 className="font-semibold">
             Droppers <span className="font-normal text-muted">{droppers.length}</span>
           </h2>
           <p className="text-sm text-muted">{everyone ? "Strongest first." : "Players who were at a rotation player's level before the slump."}</p>
-          <FlagTable flags={droppers} heldBy={heldBy} emptyText={monitoring.ok && !monitoring.date ? "No snapshot yet. It's made each morning after the box scores load." : "Nobody at this threshold."} />
+          <FlagTable flags={droppers} heldBy={heldBy} emptyText={emptyText} />
         </section>
       </main>
     </div>
