@@ -72,6 +72,14 @@ export function assembleDashboard(input: {
   };
 }
 
+/** Player id -> names of the teams (and "Watchlist") holding him. */
+export function heldByMap(d: Dashboard): Record<string, string[]> {
+  const held: Record<string, string[]> = {};
+  for (const t of d.teams) for (const p of d.rosters[t.id]) (held[p.espnId] ??= []).push(t.name);
+  for (const p of d.watchlist) (held[p.espnId] ??= []).push("Watchlist");
+  return held;
+}
+
 export async function loadDashboard(supabase: SupabaseClient): Promise<Dashboard> {
   const columns = "espn_id, name, position, team_abbr, active";
   const [teams, spots, watch, active] = await Promise.all([

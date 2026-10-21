@@ -1,3 +1,4 @@
+import { snapshotForm } from "@/lib/form";
 import { ingestGameLogs } from "@/lib/gameLogIngest";
 import { ingestLatestReport } from "@/lib/injuryIngest";
 import { syncPlayers } from "@/lib/playerSync";
@@ -24,8 +25,11 @@ export async function GET(request: Request) {
   }
   const admin = createAdminClient();
   const players = await run(() => syncPlayers(admin));
-  const gameLogs = await run(() => ingestGameLogs(admin, addDays(easternDate(), -1)));
+  const today = easternDate();
+  const gameLogs = await run(() => ingestGameLogs(admin, addDays(today, -1)));
+  // Risers and droppers through last night's games, for the Monitoring tab.
+  const form = await run(() => snapshotForm(admin, today));
   const injuryReport = await run(() => ingestLatestReport(admin, { force: true }));
-  const ok = players.ok && gameLogs.ok && injuryReport.ok;
-  return Response.json({ ok, players, gameLogs, injuryReport }, { status: ok ? 200 : 500 });
+  const ok = players.ok && gameLogs.ok && form.ok && injuryReport.ok;
+  return Response.json({ ok, players, gameLogs, form, injuryReport }, { status: ok ? 200 : 500 });
 }
